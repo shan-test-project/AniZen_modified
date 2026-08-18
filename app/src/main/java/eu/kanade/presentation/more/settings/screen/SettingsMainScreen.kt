@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
@@ -121,6 +122,12 @@ object SettingsMainScreen : Screen() {
                     subtitleRes = MR.strings.pref_ai_summary,
                     icon = Icons.Default.AutoAwesome,
                     screen = SettingsAiScreen,
+                ),
+                Item(
+                    titleRes = MR.strings.pref_category_schedule,
+                    subtitleRes = MR.strings.pref_category_schedule_summary,
+                    icon = Icons.Outlined.DateRange,
+                    screen = SettingsScheduleScreen,
                 ),
             ),
             "Connections" to listOf(

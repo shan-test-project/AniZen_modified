@@ -46,12 +46,9 @@ data object UpdatesTab : Tab {
         get() {
             val isSelected = LocalTabNavigator.current.current.key == key
             val image = AnimatedImageVector.animatedVectorResource(R.drawable.anim_updates_enter)
-            val index: UShort = when (currentNavigationStyle()) {
-                NavStyle.MOVE_UPDATES_TO_MORE -> 4u
-                NavStyle.MOVE_HISTORY_TO_MORE -> 2u
-                NavStyle.MOVE_BROWSE_TO_MORE -> 1u
-                NavStyle.SHOW_ALL -> 1u
-            }
+            val index = currentNavigationStyle().tabs().indexOf(UpdatesTab)
+                .coerceAtLeast(0)
+                .toUShort()
             return TabOptions(
                 index = index,
                 title = stringResource(MR.strings.label_recent_updates),

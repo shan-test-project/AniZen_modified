@@ -112,6 +112,11 @@ if (Config.includeTelemetry && file("google-services.json").exists()) {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-${getCommitCount()}"
             isPseudoLocalesEnabled = true
+            isMinifyEnabled = providers.gradleProperty("enable-r8-debug")
+                .map(String::toBoolean)
+                .getOrElse(false)
+            isShrinkResources = false
+            proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
         }
         val release by getting {
             isMinifyEnabled = Config.enableCodeShrink

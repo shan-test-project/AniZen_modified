@@ -48,12 +48,9 @@ data object HistoryTab : Tab {
         get() {
             val isSelected = LocalTabNavigator.current.current.key == key
             val image = AnimatedImageVector.animatedVectorResource(R.drawable.anim_history_enter)
-            val index: UShort = when (currentNavigationStyle()) {
-                NavStyle.MOVE_HISTORY_TO_MORE -> 5u
-                NavStyle.MOVE_BROWSE_TO_MORE -> 3u
-                NavStyle.SHOW_ALL -> 2u
-                else -> 2u
-            }
+            val index = currentNavigationStyle().tabs().indexOf(HistoryTab)
+                .coerceAtLeast(0)
+                .toUShort()
             return TabOptions(
                 index = index,
                 title = stringResource(MR.strings.history),

@@ -1,0 +1,61 @@
+name: AniZen v7a R8 Debug
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-debug-v7a:
+    name: Build signed debug APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Apply Spotless formatting
+        run: ./gradlew spotlessApply --no-daemon
+
+      - name: Run code analysis
+        run: ./gradlew detekt --no-daemon
+
+      - name: Get current version
+        id: get_version
+        run: |
+          GRADLE_FILE="app/build.gradle.kts"
+          CURRENT_VN=$(grep "versionName =" "$GRADLE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+          echo "VERSION=$CURRENT_VN" >> "$GITHUB_ENV"
+          echo "CURRENT_VN=$CURRENT_VN"
+
+      - name: Build v7a R8 debug APK
+        run: ./gradlew assembleDebug -PabiList=armeabi-v7a -Penable-r8-debug=true -Pinclude-telemetry=false -Penable-updater=false --no-daemon
+
+      - name: Rename APK
+        run: |
+          VERSION="${{ env.VERSION }}"
+          mkdir -p dist
+          find app/build/outputs/apk/debug -type f -name "*.apk" -exec cp {} "dist/AniZen-v${VERSION}-v7a-r8-debug.apk" \;
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniZen-v${{ env.VERSION }}-v7a-r8-debug
+          path: dist/AniZen-v${{ env.VERSION }}-v7a-r8-debug.apk
+          if-no-files-found: error
+          retention-days: 7

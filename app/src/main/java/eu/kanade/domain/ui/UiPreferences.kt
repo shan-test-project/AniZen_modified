@@ -40,7 +40,8 @@ class UiPreferences(
 
     fun startScreen() = preferenceStore.getEnum("start_screen", StartScreen.LIBRARY)
 
-    fun navStyle() = preferenceStore.getEnum("bottom_rail_nav_style", NavStyle.SHOW_ALL)
+    // Keep the default bottom bar compact while making the schedule available from More.
+    fun navStyle() = preferenceStore.getEnum("bottom_rail_nav_style", NavStyle.MOVE_SCHEDULE_TO_MORE)
 
     fun enableFeed() = preferenceStore.getBoolean("enable_feed", false)
 
