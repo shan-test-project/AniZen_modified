@@ -1,0 +1,91 @@
+# AniZen_modified handoff and schedule-feature research
+# Updated: 2026-08-18 (Asia/Dhaka)
+#
+# Repository copy:
+# - Source: https://github.com/salmanbappi/AniZen
+# - Source master at copy time: 7370286a10d78c4628370db3be0d47aacd83835c
+# - Destination: https://github.com/shan-test-project/AniZen_modified
+# - Normal branches and tags were mirrored. GitHub pull-request refs were not copied
+#   because refs/pull/* are hidden and GitHub rejects creating them in a normal repo.
+# - The source contains large APK binaries (GitHub warned about files above 50 MB).
+#
+# Requested feature to port next:
+# - https://github.com/komikku-app/anikku/pull/264
+# - Title: feat: Add Airing Schedule tab + navigation reorder (Updates → More, History
+#   2nd, Schedule 3rd)
+# - Status at research time: OPEN, not merged
+# - Base: 7ebdc04d97ea40bc5aec4c27d23caaa14870c247
+# - Head: f0d608d090ddda4f8fc0fb50dbf7985d8fb111fc
+# - Head branch: shan-test-project/anikku:feat/airing-schedule
+# - The PR is 25 files, approximately 2,720 additions and 11 deletions.
+#
+# PR implementation map:
+# 1. mihon.feature.airingschedule.AiringScheduleRepository
+#    - Calls https://graphql.anilist.co/ with a weekly AiringSchedule GraphQL query.
+#    - Fetches Monday 00:00 through the following Monday minus one second, 50 rows per
+#      page, up to 10 pages. It retries 429/502/503/504 and IO failures up to 5 times
+#      with exponential backoff, jitter, and a 500 ms delay between pages.
+#    - Maps AniList schedule/media/title/cover/episode/status/score/format/adult/genre
+#      fields into AiringScheduleEntry. Adult entries are filtered before display.
+# 2. AiringScheduleEntry
+#    - Stable scheduleId/mediaId/episode/airingAt model with English, Romaji, native,
+#      and user-preferred title fallbacks; hasAired() compares epoch seconds.
+# 3. AiringScheduleScreenModel + AiringScheduleTab + ScheduleAnimeCard
+#    - Loads the current week, groups entries by local day, and displays a day pager.
+#    - Observes the anime library and source preferences. Source matching is title-based
+#      across normalized title candidates; keep this limitation in mind for aliases.
+#    - Supports title language, adult visibility, favorite/pinned-source filtering,
+#      auto-add from pinned sources, source upload-delay adjustment, search/add-to-library,
+#      and notification bell actions.
+# 4. SchedulePreferences + SettingsScheduleScreen
+#    - Stores favorite source IDs, filters, title language, adult toggle, manual/custom
+#      delay, learned source delays, auto-refresh settings, and notification IDs/alarm keys.
+#    - Auto-refresh choices are 1–7 days (default 7). Upload-delay choices are 30 min,
+#      1/2/6/12 hours, custom, or never. Settings start/cancel the workers reactively.
+# 5. ScheduleDataRefreshWorker
+#    - Unique WorkManager periodic job, network-constrained, caches the current week in
+#      schedule_cache.json, retries transient failures, and re-arms series alarms after
+#      each refresh. It is disabled unless the user enables auto-refresh.
+# 6. ScheduleRefreshWorker + UploadDelayTracker
+#    - Periodically compares AniList air times with matching library anime episode upload
+#      times to learn per-source delay. It caps source calls per run at 12 and smooths each
+#      observation with 60% previous value / 40% new value. Custom and Never cancel it.
+# 7. ScheduleNotifications + ScheduleAlarmReceiver
+#    - Uses mediaId:episode alarm keys, AlarmManager exact alarms, and a receiver that
+#      posts a high-priority notification with cover image and a search action in MainActivity.
+#    - Android 12+ exact-alarm permission is checked/requested. Persisted alarm-key writes
+#      are serialized with a mutex because UI, workers, and receivers can race.
+# 8. Navigation/settings/resources
+#    - Adds AiringScheduleTab and changes NavStyle to include it between History and Browse;
+#      MOVE_SCHEDULE_TO_MORE can move it into More. Adds schedule settings and translated
+#      strings, notification channel/ID, DI bindings, receiver manifest entry, and a small
+#      CloudflareInterceptor change.
+#
+# AniZen adaptation cautions:
+# - AniZen is an anime fork, and this PR is already anime-oriented (GetLibraryAnime,
+#   ScheduleAnimeCard, anime episode_number/source APIs), so the domain model direction is
+#   compatible. Still verify package names and current AniZen APIs before applying files.
+# - Do not blindly apply the PR's AndroidManifest deletions. Preserve AniZen's existing
+#   anizen OAuth deep-link scheme, tracker hosts, Google OAuth scheme, updater receiver,
+#   and existing service attributes; add only the schedule receiver/permissions needed.
+# - Check AniZen's icon/resources before using the PR's ic_komikku notification icon.
+# - Merge only the schedule strings into AniZen's current i18n/resource files. The PR's
+#   base-string edits are not a substitute for regenerating AniZen's Moko resources.
+# - Review the CloudflareInterceptor hunk independently; it is not inherently required
+#   by the schedule UI and should not weaken existing network behavior.
+# - The PR's default NavStyle changes existing navigation behavior. Decide explicitly
+#   whether AniZen should use Schedule as a primary tab or place it under More.
+# - AniList is public but rate-limited; retain the retry/page-delay behavior and test with
+#   both empty schedules and HTTP 429 responses. No API key belongs in the app.
+#
+# Recommended port order:
+# 1. Add the model/repository and verify GraphQL parsing with the existing NetworkHelper/Json.
+# 2. Add preferences, DI, cache worker, and screen model; validate date/time-zone boundaries.
+# 3. Add the tab/card UI and navigation without changing unrelated manifest/deep-link behavior.
+# 4. Add upload-delay learning and settings after the basic schedule renders reliably.
+# 5. Add alarms/notifications and Android exact-alarm handling last, then test reboot,
+#    duplicate toggles, already-aired episodes, and series rescheduling.
+# 6. Run Spotless, compile the preview APK, and manually test tracker logins, custom covers,
+#    Feed/Recommendations, schedule refresh, and notification permission flows together.
+#
+# Current state: research only; schedule code has not been applied to AniZen_modified.
