@@ -8,7 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import eu.kanade.domain.anime.model.toSAnime
+import tachiyomi.domain.anime.model.toSAnime
 import eu.kanade.domain.source.service.SourcePreferences
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.anime.interactor.GetLibraryAnime
