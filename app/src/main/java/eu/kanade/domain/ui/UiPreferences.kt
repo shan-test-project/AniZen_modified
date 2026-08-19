@@ -152,7 +152,6 @@ class UiPreferences(
                     visible.addAll(listOf(NavItem.UPDATES.id, NavItem.BROWSE.id))
                 }
                 NavStyle.MOVE_SCHEDULE_TO_MORE -> {
-                    hidden.add(NavItem.SCHEDULE.id)
                     visible.addAll(listOf(NavItem.UPDATES.id, NavItem.HISTORY.id, NavItem.BROWSE.id))
                 }
                 NavStyle.MOVE_BROWSE_TO_MORE -> {
