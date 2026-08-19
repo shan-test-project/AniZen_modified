@@ -1543,6 +1543,7 @@
     <!-- Airing Schedule -->
     <string name="information_no_airing_today">No anime airing today</string>
     <string name="label_airing_schedule">Airing Schedule</string>
+    <string name="label_schedule_short">Schedule</string>
     <string name="pref_category_schedule">Schedule</string>
     <string name="pref_category_schedule_summary">Weekly airing schedule from AniList</string>
     <string name="pref_schedule_sources_title">Favorite Sources</string>

@@ -82,7 +82,7 @@ data object AiringScheduleTab : Tab {
                 .toUShort()
             return TabOptions(
                 index = index,
-                title = stringResource(MR.strings.label_airing_schedule),
+                title = stringResource(MR.strings.label_schedule_short),
                 icon = rememberVectorPainter(Icons.Outlined.DateRange),
             )
         }
