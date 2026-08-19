@@ -92,7 +92,7 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
 
         runCatching {
             context.notify(notificationId, Notifications.CHANNEL_AIRING_SCHEDULE) {
-                setSmallIcon(R.drawable.ic_komikku)
+                setSmallIcon(R.drawable.ic_splash_logo)
                 setContentTitle(title)
                 setContentText(contentText)
                 setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
