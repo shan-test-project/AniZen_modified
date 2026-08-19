@@ -4,8 +4,10 @@ import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import eu.kanade.core.preference.asState
 import eu.kanade.domain.base.BasePreferences
@@ -19,6 +21,9 @@ import eu.kanade.tachiyomi.ui.player.MPV_KT
 import eu.kanade.tachiyomi.ui.player.MPV_KT_PREVIEW
 import eu.kanade.tachiyomi.ui.player.MPV_PLAYER
 import eu.kanade.tachiyomi.ui.player.MPV_REMOTE
+import eu.kanade.tachiyomi.ui.player.MPV_REX
+import eu.kanade.tachiyomi.ui.player.MPV_RX
+import eu.kanade.tachiyomi.ui.player.MPV_EX
 import eu.kanade.tachiyomi.ui.player.MX_PLAYER
 import eu.kanade.tachiyomi.ui.player.MX_PLAYER_FREE
 import eu.kanade.tachiyomi.ui.player.MX_PLAYER_PRO
@@ -27,7 +32,10 @@ import eu.kanade.tachiyomi.ui.player.PlayerOrientation
 import eu.kanade.tachiyomi.ui.player.VLC_PLAYER
 import eu.kanade.tachiyomi.ui.player.WEB_VIDEO_CASTER
 import eu.kanade.tachiyomi.ui.player.X_PLAYER
+import eu.kanade.tachiyomi.ui.player.settings.DecoderPreferences
 import eu.kanade.tachiyomi.ui.player.settings.PlayerPreferences
+import eu.kanade.tachiyomi.ui.player.utils.DefaultStreamPreferenceStore
+import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.LocalHttpServerHolder
 import eu.kanade.tachiyomi.util.LocalHttpServerService
 import kotlinx.collections.immutable.persistentListOf
@@ -51,6 +59,7 @@ object PlayerSettingsPlayerScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> {
         val playerPreferences = remember { Injekt.get<PlayerPreferences>() }
+        val decoderPreferences = remember { Injekt.get<DecoderPreferences>() }
         val basePreferences = remember { Injekt.get<BasePreferences>() }
         val torrentServerPreferences = remember { Injekt.get<TorrentServerPreferences>() }
         val deviceSupportsPip = basePreferences.deviceHasPip()
@@ -84,8 +93,13 @@ object PlayerSettingsPlayerScreen : SearchableSettings {
             ),
             getControlsGroup(playerPreferences = playerPreferences),
             getHosterGroup(playerPreferences = playerPreferences),
+            getPerformanceGroup(
+                playerPreferences = playerPreferences,
+                decoderPreferences = decoderPreferences,
+            ),
             getDisplayGroup(playerPreferences = playerPreferences),
             getIntroSkipGroup(playerPreferences = playerPreferences),
+            getFillerSkipGroup(playerPreferences = playerPreferences),
             if (deviceSupportsPip) getPipGroup(playerPreferences = playerPreferences) else null,
             getExternalPlayerGroup(
                 playerPreferences = playerPreferences,
@@ -97,12 +111,62 @@ object PlayerSettingsPlayerScreen : SearchableSettings {
     }
 
     @Composable
+    private fun getPerformanceGroup(
+        playerPreferences: PlayerPreferences,
+        decoderPreferences: DecoderPreferences,
+    ): Preference.PreferenceGroup {
+        val performanceProfile = decoderPreferences.performanceProfile()
+        val preloadMode = playerPreferences.preloadMode()
+        val networkAwareThrottling = playerPreferences.networkAwareThrottling()
+        val selfHealingLinks = playerPreferences.selfHealingLinks()
+        val intelligentBufferHandoff = playerPreferences.intelligentBufferHandoff()
+
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_category_player_performance),
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.ListPreference(
+                    pref = performanceProfile,
+                    title = stringResource(MR.strings.pref_performance_profile),
+                    subtitle = stringResource(MR.strings.pref_performance_profile_summary),
+                    entries = eu.kanade.tachiyomi.ui.player.PlayerEfficiency.entries.associateWith {
+                        stringResource(it.titleRes)
+                    }.toPersistentMap(),
+                ),
+                Preference.PreferenceItem.ListPreference(
+                    pref = preloadMode,
+                    title = stringResource(MR.strings.pref_preload_mode),
+                    subtitle = stringResource(MR.strings.pref_preload_mode_summary),
+                    entries = eu.kanade.tachiyomi.ui.player.PreloadMode.entries.associateWith {
+                        stringResource(it.titleRes)
+                    }.toPersistentMap(),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = networkAwareThrottling,
+                    title = stringResource(MR.strings.pref_network_aware_throttling),
+                    subtitle = stringResource(MR.strings.pref_network_aware_throttling_summary),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = selfHealingLinks,
+                    title = stringResource(MR.strings.pref_self_healing_links),
+                    subtitle = stringResource(MR.strings.pref_self_healing_links_summary),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = intelligentBufferHandoff,
+                    title = stringResource(MR.strings.pref_intelligent_buffer_handoff),
+                    subtitle = stringResource(MR.strings.pref_intelligent_buffer_handoff_summary),
+                ),
+            ),
+        )
+    }
+
+    @Composable
     private fun getControlsGroup(playerPreferences: PlayerPreferences): Preference.PreferenceGroup {
         val allowGestures = playerPreferences.allowGestures()
         val showLoading = playerPreferences.showLoadingCircle()
         val showChapter = playerPreferences.showCurrentChapter()
         val rememberPlayerBrightness = playerPreferences.rememberPlayerBrightness()
         val rememberPlayerVolume = playerPreferences.rememberPlayerVolume()
+        val rememberAspectRatio = playerPreferences.rememberAspectRatio()
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_controls),
@@ -128,18 +192,61 @@ object PlayerSettingsPlayerScreen : SearchableSettings {
                     pref = rememberPlayerVolume,
                     title = stringResource(MR.strings.pref_remember_volume),
                 ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = rememberAspectRatio,
+                    title = stringResource(MR.strings.pref_remember_aspect_ratio),
+                ),
             ),
         )
     }
 
     @Composable
     private fun getHosterGroup(playerPreferences: PlayerPreferences): Preference.PreferenceGroup {
+        val context = LocalContext.current
         val showFailure = playerPreferences.showFailedHosters()
         val showEmpty = playerPreferences.showEmptyHosters()
+        val preferredQuality = playerPreferences.preferredQuality()
+        val perAnimeDefaultStream = playerPreferences.perAnimeDefaultStream()
+        val showDefaultStreamHighlight = playerPreferences.showDefaultStreamHighlight()
+        val autoScrollDefaultStream = playerPreferences.autoScrollDefaultStream()
+        val perAnimeDefaultStreamEnabled by perAnimeDefaultStream.collectAsState()
+        val streamStore = remember(playerPreferences) { DefaultStreamPreferenceStore(playerPreferences) }
+        val perAnimeData by playerPreferences.perAnimeDefaultStreamData().collectAsState()
+        var clearGeneration by remember { mutableIntStateOf(0) }
+        val savedCount = remember(perAnimeData, clearGeneration) {
+            streamStore.savedAnimeCount()
+        }
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_hosters),
             preferenceItems = persistentListOf(
+                Preference.PreferenceItem.ListPreference(
+                    pref = preferredQuality,
+                    title = stringResource(MR.strings.pref_preferred_quality),
+                    entries = persistentMapOf(
+                        "1080" to stringResource(MR.strings.pref_high_quality),
+                        "720" to "720p",
+                        "480" to "480p",
+                        "360" to "360p",
+                    ),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = perAnimeDefaultStream,
+                    title = stringResource(MR.strings.pref_default_stream_per_anime),
+                    subtitle = stringResource(MR.strings.pref_default_stream_per_anime_summary),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = showDefaultStreamHighlight,
+                    title = stringResource(MR.strings.pref_default_stream_highlight),
+                    subtitle = stringResource(MR.strings.pref_default_stream_highlight_summary),
+                    enabled = perAnimeDefaultStreamEnabled,
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = autoScrollDefaultStream,
+                    title = stringResource(MR.strings.pref_default_stream_auto_scroll),
+                    subtitle = stringResource(MR.strings.pref_default_stream_auto_scroll_summary),
+                    enabled = perAnimeDefaultStreamEnabled,
+                ),
                 Preference.PreferenceItem.SwitchPreference(
                     pref = showFailure,
                     title = stringResource(MR.strings.pref_hosters_show_failure),
@@ -147,6 +254,15 @@ object PlayerSettingsPlayerScreen : SearchableSettings {
                 Preference.PreferenceItem.SwitchPreference(
                     pref = showEmpty,
                     title = stringResource(MR.strings.pref_hosters_show_empty),
+                ),
+                Preference.PreferenceItem.TextPreference(
+                    title = stringResource(MR.strings.pref_default_stream_clear),
+                    subtitle = stringResource(MR.strings.pref_default_stream_clear_summary, savedCount),
+                    onClick = {
+                        streamStore.clearAll()
+                        clearGeneration++
+                        context.toast(MR.strings.pref_default_stream_cleared)
+                    },
                 ),
             ),
         )
@@ -268,6 +384,22 @@ object PlayerSettingsPlayerScreen : SearchableSettings {
                 Preference.PreferenceItem.InfoPreference(
                     title = stringResource(MR.strings.pref_category_player_aniskip_info),
                     enabled = isIntroSkipEnabled,
+                ),
+            ),
+        )
+    }
+
+    @Composable
+    private fun getFillerSkipGroup(playerPreferences: PlayerPreferences): Preference.PreferenceGroup {
+        val skipFillerEpisodes = playerPreferences.skipFillerEpisodes()
+
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_category_filler),
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = skipFillerEpisodes,
+                    title = stringResource(MR.strings.pref_skip_filler_episodes),
+                    subtitle = stringResource(MR.strings.pref_skip_filler_episodes_summary),
                 ),
             ),
         )
@@ -450,4 +582,7 @@ val externalPlayers = listOf(
     X_PLAYER,
     WEB_VIDEO_CASTER,
     AMNIS,
+    MPV_REX,
+    MPV_RX,
+    MPV_EX,
 )

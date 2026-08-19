@@ -1,20 +1,24 @@
 package eu.kanade.presentation.library.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
@@ -35,9 +40,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -46,6 +54,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.kanade.presentation.anime.components.AnimeCover
+import eu.kanade.presentation.browse.components.SourceIcon
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.BadgeGroup
 import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
@@ -55,6 +64,7 @@ import eu.kanade.domain.ui.UiPreferences
 import androidx.compose.runtime.collectAsState
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.selectedBackground
+import tachiyomi.domain.source.model.Source
 import tachiyomi.domain.anime.model.AnimeCover as EntryCoverModel
 
 object CommonAnimeItemDefaults {
@@ -91,21 +101,26 @@ fun AnimeCompactGridItem(
     coverAlpha: Float = 1f,
     coverBadgeStart: @Composable (RowScope.() -> Unit)? = null,
     coverBadgeEnd: @Composable (RowScope.() -> Unit)? = null,
+    usePanorama: Boolean? = null,
 ) {
     GridItemSelectable(
         isSelected = isSelected,
         onClick = onClick,
         onLongClick = onLongClick,
     ) {
-        val (entry, ratio) = AnimeCover.getEntry(coverData.animeId)
+        val (entry, ratio) = AnimeCover.getEntry(coverData.animeId, usePanoramaOverride = usePanorama)
         AnimeGridCover(
             cover = {
                 entry(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .graphicsLayer { alpha = if (isSelected) GRID_SELECTED_COVER_ALPHA else coverAlpha },
+                        .graphicsLayer {
+                            this.alpha = if (isSelected) GRID_SELECTED_COVER_ALPHA else coverAlpha
+                            this.compositingStrategy = CompositingStrategy.ModulateAlpha
+                        },
                     data = coverData,
                     ratio = ratio,
+                    shape = RectangleShape, // Optimization: Parent clips
                 )
             },
             ratio = ratio,
@@ -136,22 +151,24 @@ fun AnimeCompactGridItem(
  * Title overlay for [AnimeCompactGridItem]
  */
 @Composable
-private fun BoxScope.CoverTextOverlay(
+internal fun BoxScope.CoverTextOverlay(
     title: String,
-    onClickContinueWatching: (() -> Unit)? = null,
+    onClickContinueWatching: (() -> Unit)?,
 ) {
-    Box(
+    val gradient = remember {
+        Brush.verticalGradient(
+            0f to Color.Transparent,
+            1f to Color(0xCC000000),
+        )
+    }
+    Spacer(
         modifier = Modifier
-            .clip(MaterialTheme.shapes.medium)
-            .background(
-                Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    1f to Color(0xCC000000),
-                ),
-            )
             .fillMaxHeight(0.33f)
             .fillMaxWidth()
-            .align(Alignment.BottomCenter),
+            .align(Alignment.BottomCenter)
+            .drawBehind {
+                drawRect(brush = gradient)
+            },
     )
     Row(
         modifier = Modifier.align(Alignment.BottomStart),
@@ -164,10 +181,6 @@ private fun BoxScope.CoverTextOverlay(
             title = title,
             style = MaterialTheme.typography.titleSmall.copy(
                 color = Color.White,
-                shadow = Shadow(
-                    color = Color.Black,
-                    blurRadius = 4f,
-                ),
             ),
             minLines = 1,
         )
@@ -200,22 +213,27 @@ fun AnimeComfortableGridItem(
     coverBadgeStart: (@Composable RowScope.() -> Unit)? = null,
     coverBadgeEnd: (@Composable RowScope.() -> Unit)? = null,
     onClickContinueWatching: (() -> Unit)? = null,
+    usePanorama: Boolean? = null,
 ) {
     GridItemSelectable(
         isSelected = isSelected,
         onClick = onClick,
         onLongClick = onLongClick,
     ) {
-        val (entry, ratio) = AnimeCover.getEntry(coverData.animeId)
+        val (entry, ratio) = AnimeCover.getEntry(coverData.animeId, usePanoramaOverride = usePanorama)
         Column {
             AnimeGridCover(
                 cover = {
                     entry(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .graphicsLayer { alpha = if (isSelected) GRID_SELECTED_COVER_ALPHA else coverAlpha },
+                            .graphicsLayer {
+                                this.alpha = if (isSelected) GRID_SELECTED_COVER_ALPHA else coverAlpha
+                                this.compositingStrategy = CompositingStrategy.ModulateAlpha
+                            },
                         data = coverData,
                         ratio = ratio,
+                        shape = RectangleShape, // Optimization: Parent clips
                     )
                 },
                 ratio = ratio,
@@ -251,6 +269,7 @@ fun AnimeComfortableGridItem(
 @Composable
 private fun AnimeGridCover(
     modifier: Modifier = Modifier,
+    shape: Shape = MaterialTheme.shapes.medium,
     ratio: Float = AnimeCover.Book.ratio,
     cover: @Composable BoxScope.() -> Unit = {},
     badgesStart: (@Composable RowScope.() -> Unit)? = null,
@@ -260,7 +279,11 @@ private fun AnimeGridCover(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(ratio),
+            .aspectRatio(ratio)
+            .graphicsLayer {
+                this.shape = shape
+                this.clip = true
+            },
     ) {
         cover()
         content?.invoke(this)
@@ -285,7 +308,7 @@ private fun AnimeGridCover(
 }
 
 @Composable
-private fun GridItemTitle(
+internal fun GridItemTitle(
     title: String,
     style: TextStyle,
     minLines: Int,
@@ -308,7 +331,7 @@ private fun GridItemTitle(
  * Wrapper for grid items to handle selection state, click and long click.
  */
 @Composable
-private fun GridItemSelectable(
+internal fun GridItemSelectable(
     isSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -317,33 +340,40 @@ private fun GridItemSelectable(
 ) {
     val uiPreferences = remember { Injekt.get<UiPreferences>() }
     val animatedTransitions by uiPreferences.animatedTransitions().collectAsStatePref()
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val scale by animateFloatAsState(
         if (isSelected && animatedTransitions) 0.95f else 1f,
         label = "selection_scale",
     )
     val shape = MaterialTheme.shapes.medium
+    val borderColor = MaterialTheme.colorScheme.primary
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
     Box(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(shape)
-            .combinedClickable(
-                onClick = {
-                    onClick()
-                },
-                onLongClick = {
-                    onLongClick()
+            .then(
+                if (scale < 1f) {
+                    Modifier.graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        this.shape = shape
+                        this.clip = true
+                    }
+                } else {
+                    Modifier.clip(shape)
                 },
             )
-            .then(
+            .drawBehind {
                 if (isSelected) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape)
-                } else {
-                    Modifier
-                },
+                    drawRoundRect(
+                        color = borderColor,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()),
+                    )
+                }
+            }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
             )
             .padding(4.dp),
     ) {
@@ -365,7 +395,9 @@ private fun GridItemSelectable(
                     .size(24.dp)
                     .align(Alignment.TopEnd)
                     .padding(4.dp)
-                    .background(MaterialTheme.colorScheme.surface, CircleShape),
+                    .drawBehind {
+                        drawCircle(color = surfaceColor)
+                    },
             )
         }
     }
@@ -386,37 +418,36 @@ fun AnimeListItem(
     onClickContinueWatching: (() -> Unit)? = null,
     entries: Int = 0,
     containerHeight: Int = 0,
+    usePanorama: Boolean? = null,
 ) {
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val density = LocalDensity.current
-    val height = remember(entries, containerHeight, density) {
-        if (entries > 0 && containerHeight > 0) {
-            with(density) { (containerHeight / entries).toDp() } - (3 / entries).dp
-        } else {
-            76.dp
-        }
+    val height = remember(usePanorama) {
+        if (usePanorama == true) 96.dp else 76.dp
     }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .selectedBackground(isSelected)
             .height(height)
-            .combinedClickable(
+            .clickable(
                 onClick = {
                     onClick()
-                },
-                onLongClick = {
-                    onLongClick()
                 },
             )
             .padding(horizontal = 16.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val (entry, ratio) = AnimeCover.getEntry(coverData.animeId)
+        val (entry, ratio) = AnimeCover.getEntry(
+            coverData.animeId,
+            usePanoramaOverride = usePanorama,
+        )
         entry(
             modifier = Modifier
                 .fillMaxHeight()
-                .graphicsLayer { alpha = coverAlpha },
+                .graphicsLayer {
+                    alpha = coverAlpha
+                    this.compositingStrategy = CompositingStrategy.ModulateAlpha
+                },
             data = coverData,
             ratio = ratio,
         )
@@ -425,6 +456,7 @@ fun AnimeListItem(
             modifier = Modifier
                 .padding(horizontal = 16.dp)
                 .weight(1f),
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodyMedium,
         )

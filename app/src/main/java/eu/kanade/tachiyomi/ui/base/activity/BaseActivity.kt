@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.base.activity
 
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate

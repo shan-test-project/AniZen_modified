@@ -28,20 +28,29 @@ import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.util.removeCovers
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.PersistentList
 import kotlinx.collections.immutable.mutate
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import tachiyomi.core.common.preference.CheckboxState
@@ -59,6 +68,7 @@ import tachiyomi.domain.episode.interactor.SetAnimeDefaultEpisodeFlags
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.source.interactor.DeleteSavedSearchById
 import tachiyomi.domain.source.interactor.GetRemoteAnime
+import tachiyomi.domain.source.interactor.GetSavedSearchById
 import tachiyomi.domain.source.interactor.GetSavedSearchBySourceId
 import tachiyomi.domain.source.interactor.InsertSavedSearch
 import tachiyomi.domain.source.model.SavedSearch
@@ -71,6 +81,7 @@ import eu.kanade.tachiyomi.animesource.model.AnimeFilter as AnimeSourceModelFilt
 class BrowseSourceScreenModel(
     private val sourceId: Long,
     listingQuery: String?,
+    private val savedSearchId: Long? = null,
     sourceManager: SourceManager = Injekt.get(),
     sourcePreferences: SourcePreferences = Injekt.get(),
     basePreferences: BasePreferences = Injekt.get(),
@@ -85,6 +96,7 @@ class BrowseSourceScreenModel(
     private val networkToLocalAnime: NetworkToLocalAnime = Injekt.get(),
     private val updateAnime: UpdateAnime = Injekt.get(),
     private val addTracks: AddTracks = Injekt.get(),
+    private val getSavedSearchById: GetSavedSearchById = Injekt.get(),
     private val getSavedSearchBySourceId: GetSavedSearchBySourceId = Injekt.get(),
     private val insertSavedSearch: InsertSavedSearch = Injekt.get(),
     private val deleteSavedSearchById: DeleteSavedSearchById = Injekt.get(),
@@ -98,6 +110,15 @@ class BrowseSourceScreenModel(
     val source = sourceManager.getOrStub(sourceId)
 
     init {
+        if (savedSearchId != null) {
+            screenModelScope.launch {
+                val savedSearch = getSavedSearchById.awaitOrNull(savedSearchId)
+                if (savedSearch != null) {
+                    loadSearch(savedSearch)
+                }
+            }
+        }
+
         if (source is CatalogueSource) {
             mutableState.update {
                 var query: String? = null
@@ -116,6 +137,31 @@ class BrowseSourceScreenModel(
             }
         }
 
+        // debounce search updates
+        screenModelScope.launch {
+            state.map { it.toolbarQuery }
+                .distinctUntilChanged()
+                .scan<String?, Pair<String?, String?>>(null to null) { acc, new ->
+                    acc.second to new
+                }
+                .filter { sourcePreferences.autoSearch().get() }
+                .drop(2) // ignore initial state
+                .transformLatest { (prev, current) ->
+                    val isDeletion = (current?.length ?: 0) < (prev?.length ?: 0)
+                    kotlinx.coroutines.delay(if (isDeletion) 800L else 500L)
+                    emit(current)
+                }
+                .collectLatest { query ->
+                    val currentListing = state.value.listing
+                    if (currentListing.query != query) {
+                        if (query.isNullOrEmpty() && currentListing !is Listing.Search) {
+                            return@collectLatest
+                        }
+                        search(query)
+                    }
+                }
+        }
+
         if (!basePreferences.incognitoMode().get()) {
             sourcePreferences.lastUsedSource().set(source.id)
         }
@@ -128,7 +174,7 @@ class BrowseSourceScreenModel(
 
         getFavorites.subscribe(sourceId)
             .onEach { favorites ->
-                mutableState.update { it.copy(favoriteIds = favorites.map { fav -> fav.id }.toSet()) }
+                mutableState.update { it.copy(favoriteIds = favorites.map { fav -> fav.id }.toImmutableSet()) }
             }
             .launchIn(screenModelScope)
     }
@@ -141,14 +187,24 @@ class BrowseSourceScreenModel(
     val animePagerFlowFlow = state.map { it.listing }
         .distinctUntilChanged()
         .map { listing ->
-            Pager(PagingConfig(pageSize = 25)) {
+            Pager(
+                PagingConfig(
+                    pageSize = 20,
+                    prefetchDistance = 5,
+                    initialLoadSize = 40,
+                ),
+            ) {
                 getRemoteAnime.subscribe(sourceId, listing.query ?: "", listing.filters)
             }.flow.map { pagingData ->
                 pagingData.map {
-                    networkToLocalAnime.await(it.toDomainAnime(sourceId))
+                    val localAnime = networkToLocalAnime.getLocal(it.toDomainAnime(sourceId))
+                    getAnime.subscribe(localAnime.url, localAnime.source)
+                        .filterNotNull()
+                        .distinctUntilChanged()
+                        .stateIn(ioCoroutineScope, SharingStarted.WhileSubscribed(5000), localAnime)
                 }
-                    .filter { !hideInLibraryItems || !it.favorite }
-            }
+                    .filter { !hideInLibraryItems || !it.value.favorite }
+            }.cachedIn(ioCoroutineScope)
                 .cachedIn(screenModelScope)
         }
         .stateIn(screenModelScope, SharingStarted.Lazily, emptyFlow())
@@ -328,7 +384,7 @@ class BrowseSourceScreenModel(
                 new = new.removeCovers(coverCache)
             } else {
                 setAnimeDefaultEpisodeFlags.await(anime)
-                if (trackPreferences.autoAddTrack().get()) {
+                if (trackPreferences.trackOnAddingToLibrary().get()) {
                     addTracks.bindEnhancedTrackers(anime, source)
                 }
             }
@@ -361,7 +417,7 @@ class BrowseSourceScreenModel(
                 val preselectedIds = getCategories.await(anime.id).map { it.id }
                 setDialog(
                     Dialog.ChangeAnimeCategory(
-                        anime,
+                        listOf(anime),
                         categories.mapAsCheckboxState { it.id in preselectedIds }.toImmutableList(),
                     ),
                 )
@@ -369,7 +425,7 @@ class BrowseSourceScreenModel(
         }
     }
 
-    fun toggleSelection(anime: Anime) {
+    fun toggleSelection(anime: Anime, index: Int = -1) {
         mutableState.update { state ->
             val newSelection = state.selection.mutate { list ->
                 if (list.fastAny { it.id == anime.id }) {
@@ -378,7 +434,32 @@ class BrowseSourceScreenModel(
                     list.add(anime)
                 }
             }
-            state.copy(selection = newSelection)
+            state.copy(
+                selection = newSelection,
+                isSelectAllMode = false,
+                lastSelectedIndex = if (newSelection.isNotEmpty()) index else null,
+            )
+        }
+    }
+
+    fun selectRange(animeList: List<Anime?>, fromIndex: Int, toIndex: Int) {
+        mutableState.update { state ->
+            val start = minOf(fromIndex, toIndex)
+            val end = maxOf(fromIndex, toIndex)
+            val rangeItems = animeList.subList(start, end + 1).filterNotNull()
+
+            val newSelection = state.selection.mutate { list ->
+                rangeItems.forEach { anime ->
+                    if (list.none { it.id == anime.id }) {
+                        list.add(anime)
+                    }
+                }
+            }
+            state.copy(
+                selection = newSelection,
+                isSelectAllMode = false,
+                lastSelectedIndex = toIndex,
+            )
         }
     }
 
@@ -402,10 +483,11 @@ class BrowseSourceScreenModel(
 
     fun updateSelection(animeList: List<Anime>) {
         mutableState.update { state ->
+            if (!state.isSelectAllMode) return@update state
             val currentIds = state.selection.map { it.id }.toSet()
             val newItems = animeList.filter { it.id !in currentIds }
             if (newItems.isEmpty()) return@update state
-            
+
             state.copy(selection = state.selection.addAll(newItems))
         }
     }
@@ -427,24 +509,49 @@ class BrowseSourceScreenModel(
                 }
             }
             // Invert selection turns off select all mode usually as it's a specific manual action
-            state.copy(selection = newSelection, isSelectAllMode = false, targetCount = 0)
+            state.copy(selection = newSelection, isSelectAllMode = false, targetCount = 0, lastSelectedIndex = null)
         }
     }
 
     fun clearSelection() {
-        mutableState.update { it.copy(selection = persistentListOf(), isSelectAllMode = false, targetCount = 0) }
+        mutableState.update { it.copy(selection = persistentListOf(), isSelectAllMode = false, targetCount = 0, lastSelectedIndex = null) }
     }
 
     fun addSelectionToLibrary() {
         val selection = state.value.selection
         val favoriteIds = state.value.favoriteIds
         screenModelScope.launch {
-            selection.forEach { anime ->
-                if (anime.id !in favoriteIds) {
-                    addFavorite(anime)
-                }
+            val categories = getCategories()
+            val defaultCategoryId = libraryPreferences.defaultCategory().get()
+            val defaultCategory = categories.find { it.id == defaultCategoryId.toLong() }
+
+            val toAdd = selection.filter { it.id !in favoriteIds }
+            if (toAdd.isEmpty()) {
+                clearSelection()
+                return@launch
             }
-            clearSelection()
+
+            if (defaultCategory != null || defaultCategoryId == 0 || categories.isEmpty()) {
+                val categoryIds = defaultCategory?.let { listOf(it.id) } ?: emptyList()
+                toAdd.forEach { anime ->
+                    moveAnimeToCategories(anime, categoryIds)
+                    changeAnimeFavorite(anime)
+                }
+            } else {
+                // Just add to default if no specific category chosen yet, 
+                // but usually we should show category dialog for the first one and apply to all if multiple
+                // For simplicity and to fix the "only one added" bug, we'll show the dialog for the whole selection
+                val preselectedIds = emptyList<Long>() // New additions
+                setDialog(
+                    Dialog.ChangeAnimeCategory(
+                        toAdd, // Pass the whole selection
+                        categories.mapAsCheckboxState { it.id in preselectedIds }.toImmutableList(),
+                    ),
+                )
+            }
+            if (state.value.dialog !is Dialog.ChangeAnimeCategory) {
+                clearSelection()
+            }
         }
     }
 
@@ -542,7 +649,7 @@ class BrowseSourceScreenModel(
         data class RemoveAnime(val anime: Anime) : Dialog
         data class AddDuplicateAnime(val anime: Anime, val duplicate: Anime) : Dialog
         data class ChangeAnimeCategory(
-            val anime: Anime,
+            val animes: List<Anime>,
             val initialSelection: ImmutableList<CheckboxState.State<Category>>,
         ) : Dialog
         data class Migrate(val newAnime: Anime, val oldAnime: Anime) : Dialog
@@ -561,8 +668,9 @@ class BrowseSourceScreenModel(
         val dialog: Dialog? = null,
         val selection: PersistentList<Anime> = persistentListOf(),
         val isSelectAllMode: Boolean = false,
-        val favoriteIds: Set<Long> = emptySet(),
+        val favoriteIds: ImmutableSet<Long> = persistentSetOf(),
         val targetCount: Int = 0,
+        val lastSelectedIndex: Int? = null,
     ) {
         val isUserQuery get() = listing is Listing.Search && !listing.query.isNullOrEmpty()
         val selectionMode get() = selection.isNotEmpty()

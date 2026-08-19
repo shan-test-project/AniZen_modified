@@ -51,7 +51,7 @@ import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.i18n.ank.AMR
-import tachiyomi.source.local.LocalSource
+import tachiyomi.source.localanime.LocalAnimeSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
@@ -115,7 +115,7 @@ class ExternalIntents {
             torrentIntentForPackage(context, videoUrl, video)
         } else if (pkgName.isEmpty()) {
             Intent(Intent.ACTION_VIEW).apply {
-                setDataAndTypeAndNormalize(videoUrl, getMime(videoUrl))
+                setDataAndTypeAndNormalize(videoUrl, "video/*")
                 addExtrasAndFlags(false, this)
                 addVideoHeaders(false, video, this)
             }
@@ -150,7 +150,7 @@ class ExternalIntents {
         } else {
             val uri = resolvedVideo.videoUrl.toUri()
 
-            val isOnDevice = if (anime.source == LocalSource.ID) {
+            val isOnDevice = if (anime.source == LocalAnimeSource.ID) {
                 true
             } else {
                 downloadManager.isEpisodeDownloaded(
@@ -249,7 +249,7 @@ class ExternalIntents {
     private fun standardIntentForPackage(pkgName: String, context: Context, uri: Uri, video: Video): Intent {
         return Intent(Intent.ACTION_VIEW).apply {
             if (isPackageInstalled(pkgName, context.packageManager)) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && pkgName.contains("vlc")) {
+                if (pkgName.contains("mpv") || pkgName.contains("mehiz") || pkgName.contains("vlc") || pkgName.contains("marlboroadvance") || pkgName.contains("gyrolet")) {
                     setPackage(pkgName)
                 } else {
                     component = getComponent(pkgName)
@@ -269,12 +269,25 @@ class ExternalIntents {
             val requestedUrl = video.subtitleTracks.getOrNull(requestedLanguage)?.url
 
             // Just, Next, MX Player, mpv
-            putExtra("subs", video.subtitleTracks.map { Uri.parse(it.url) }.toTypedArray())
+            val subs = video.subtitleTracks.map { Uri.parse(it.url) }.toTypedArray()
+            putExtra("subs", subs)
             putExtra("subs.name", video.subtitleTracks.map { it.lang }.toTypedArray())
-            putExtra("subs.enable", requestedUrl?.let { arrayOf(Uri.parse(it)) } ?: emptyArray())
+            val subsEnable = requestedUrl?.let { arrayOf(Uri.parse(it)) } ?: emptyArray()
+            putExtra("subs.enable", subsEnable)
 
             // VLC - seems to only work for local sub files
             requestedUrl?.let { putExtra("subtitles_location", it) }
+
+            // Grant read permission to the external player package for each subtitle content URI
+            subs.forEach { subUri ->
+                if (subUri.scheme == "content") {
+                    try {
+                        context.grantUriPermission(pkgName, subUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    } catch (e: Exception) {
+                        logcat(LogPriority.WARN, e) { "Failed to grant URI permission to $pkgName for $subUri" }
+                    }
+                }
+            }
         }
     }
 
@@ -331,8 +344,14 @@ class ExternalIntents {
             val headers = video.headers ?: (source as? HttpSource)?.headers
             if (headers != null) {
                 var headersArray = arrayOf<String>()
+                val uaHeader = headers.find { it.first.equals("User-Agent", ignoreCase = true) }
+                if (uaHeader != null) {
+                    headersArray += arrayOf(uaHeader.first, uaHeader.second)
+                }
                 for (header in headers) {
-                    headersArray += arrayOf(header.first, header.second)
+                    if (!header.first.equals("User-Agent", ignoreCase = true)) {
+                        headersArray += arrayOf(header.first, header.second)
+                    }
                 }
                 putExtra("headers", headersArray)
                 val headersString = headersArray.drop(2).joinToString(": ")
@@ -351,7 +370,7 @@ class ExternalIntents {
             "mp4" -> "video/mp4"
             "mkv" -> "video/x-matroska"
             "m3u8" -> "application/x-mpegURL"
-            else -> "video/any"
+            else -> "video/*"
         }
     }
 
@@ -375,6 +394,9 @@ class ExternalIntents {
             NEXT_PLAYER -> ComponentName(packageName, "$packageName.feature.player.PlayerActivity")
             X_PLAYER -> ComponentName(packageName, "com.inshot.xplayer.activities.PlayerActivity")
             AMNIS -> ComponentName(packageName, "$packageName.gui.player.PlayerActivity")
+            MPV_REX -> ComponentName(packageName, "xyz.mpv.rex.ui.player.PlayerActivity")
+            MPV_RX -> ComponentName(packageName, "app.gyrolet.mpvrx.ui.player.PlayerActivity")
+            MPV_EX -> ComponentName(packageName, "app.marlboroadvance.mpvex.ui.player.PlayerActivity")
             else -> null
         }
     }
@@ -451,6 +473,7 @@ class ExternalIntents {
                 saveEpisodeProgress(currentExtEpisode, anime, currentPosition, duration)
             }
             saveEpisodeHistory(currentExtEpisode)
+            downloadManager.deletePendingEpisodes()
         }
     }
 
@@ -550,6 +573,10 @@ class ExternalIntents {
         if (removeAfterSeenSlots != -1 && episodeToDelete != null) {
             enqueueDeleteSeenEpisodes(episodeToDelete, anime)
         }
+
+        if (downloadPreferences.removeAfterMarkedAsSeen().get() && episode.seen) {
+            enqueueDeleteSeenEpisodes(episode, anime)
+        }
     }
 
     /**
@@ -612,6 +639,7 @@ class ExternalIntents {
                     listOf(episode),
                     anime,
                 )
+                downloadManager.deletePendingEpisodes()
             }
         }
     }
@@ -647,3 +675,6 @@ const val NEXT_PLAYER = "dev.anilbeesetti.nextplayer"
 const val X_PLAYER = "video.player.videoplayer"
 const val WEB_VIDEO_CASTER = "com.instantbits.cast.webvideo"
 const val AMNIS = "com.amnis"
+const val MPV_REX = "xyz.mpv.rex"
+const val MPV_RX = "app.gyrolet.mpvrx"
+const val MPV_EX = "app.marlboroadvance.mpvex"

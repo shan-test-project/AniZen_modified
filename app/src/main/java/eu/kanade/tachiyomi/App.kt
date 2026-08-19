@@ -19,6 +19,8 @@ import androidx.work.Configuration
 import androidx.work.WorkManager
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
+import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.allowRgb565
 import coil3.request.crossfade
@@ -57,6 +59,7 @@ import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
 import eu.kanade.tachiyomi.util.system.DeviceUtil
+import eu.kanade.tachiyomi.util.system.GLUtil
 import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.system.cancelNotification
@@ -98,6 +101,7 @@ import java.io.File
 import java.security.Security
 import java.text.SimpleDateFormat
 import java.util.Locale
+import okio.Path.Companion.toPath
 
 class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factory {
 
@@ -109,6 +113,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     @SuppressLint("LaunchActivityFromNotification")
     override fun onCreate() {
+        registerActivityLifecycleCallbacks(eu.kanade.tachiyomi.network.interceptor.ActivityTracker)
+
         super<Application>.onCreate()
         patchInjekt()
 
@@ -132,7 +138,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
             // Eagerly initialize expensive singletons on background thread
             Injekt.get<Database>()
-            Injekt.get<UiPreferences>()
+            val uiPreferences = Injekt.get<UiPreferences>()
+            uiPreferences.migrateNavStyle()
             Injekt.get<NetworkHelper>()
             Injekt.get<eu.kanade.tachiyomi.extension.ExtensionManager>()
             Injekt.get<SourceManager>()
@@ -258,10 +265,22 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             allowRgb565(DeviceUtil.isLowRamDevice(this@App))
             if (networkPreferences.verboseLogging().get()) logger(DebugLogger())
 
-            fetcherCoroutineContext(Dispatchers.IO.limitedParallelism(4))
-            decoderCoroutineContext(Dispatchers.IO.limitedParallelism(4)) // Optimized for mid-range CPU cores
-        }
-            .build()
+            memoryCache {
+                MemoryCache.Builder()
+                    .maxSizePercent(this@App, 0.25) // Balanced 25% RAM allocation for stability
+                    .build()
+            }
+            diskCache {
+                DiskCache.Builder()
+                    .directory(this@App.cacheDir.resolve("image_cache").absolutePath.toPath())
+                    .maxSizeBytes(500L * 1024 * 1024) // Maintain 500MB disk cache for high retention
+                    .build()
+            }
+
+            val coreCount = Runtime.getRuntime().availableProcessors()
+            fetcherCoroutineContext(Dispatchers.IO.limitedParallelism(coreCount.coerceIn(4, 12)))
+            decoderCoroutineContext(Dispatchers.IO.limitedParallelism(coreCount.coerceIn(3, 8))) // Balanced for performance and UI smoothness
+        }.build()
     }
 
     override fun onStart(owner: LifecycleOwner) {

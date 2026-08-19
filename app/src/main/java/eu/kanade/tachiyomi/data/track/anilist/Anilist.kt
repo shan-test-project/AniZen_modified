@@ -3,11 +3,15 @@ package eu.kanade.tachiyomi.data.track.anilist
 import android.graphics.Color
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.domain.track.model.toDbTrack
+import eu.kanade.tachiyomi.animesource.model.Credit
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.database.models.Track
 import eu.kanade.tachiyomi.data.track.AnimeTracker
 import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.DeletableTracker
+import eu.kanade.tachiyomi.data.track.ImportableTracker
+import eu.kanade.tachiyomi.data.track.ImportableEntry
+import eu.kanade.tachiyomi.data.track.ImportStatusFilter
 import eu.kanade.tachiyomi.data.track.anilist.dto.ALOAuth
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import kotlinx.collections.immutable.ImmutableList
@@ -25,7 +29,8 @@ class Anilist(id: Long) :
         "AniList",
     ),
     AnimeTracker,
-    DeletableTracker {
+    DeletableTracker,
+    ImportableTracker {
 
     companion object {
         const val READING = 1L
@@ -49,7 +54,7 @@ class Anilist(id: Long) :
 
     private val interceptor by lazy { AnilistInterceptor(this, getPassword()) }
 
-    private val api by lazy { AnilistApi(client, interceptor) }
+    val api by lazy { AnilistApi(client, interceptor) }
 
     override val supportsReadingDates: Boolean = true
 
@@ -220,6 +225,21 @@ class Anilist(id: Long) :
         return track
     }
 
+    private val relationsCache = java.util.concurrent.ConcurrentHashMap<Long, List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>>()
+
+    suspend fun getAnimeRelations(trackId: Long): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
+        val cached = relationsCache[trackId]
+        if (cached != null) return cached
+        val fetched = api.getRelations(trackId.toInt())
+        relationsCache[trackId] = fetched
+        return fetched
+    }
+
+    suspend fun getUserAnimeList(): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALUserListItem> {
+        return api.getUserAnimeList(getUsername().toInt())
+    }
+
+
     override suspend fun login(username: String, password: String) = login(password)
 
     suspend fun login(token: String) {
@@ -238,6 +258,15 @@ class Anilist(id: Long) :
         super.logout()
         trackPreferences.trackToken(this).delete()
         interceptor.setAuth(null)
+        relationsCache.clear()
+    }
+
+    override suspend fun getAnimeMetadata(track: DomainAnimeTrack): eu.kanade.tachiyomi.data.track.model.TrackAnimeMetadata? {
+        return api.getAnimeMetadata(track)
+    }
+
+    override suspend fun fetchCastByTitle(remoteId: Long, mediaType: String): List<Credit>? {
+        return api.fetchCastById(remoteId)
     }
 
     fun saveOAuth(alOAuth: ALOAuth?) {
@@ -249,6 +278,36 @@ class Anilist(id: Long) :
             json.decodeFromString<ALOAuth>(trackPreferences.trackToken(this).get())
         } catch (e: Exception) {
             null
+        }
+    }
+
+    override fun getNoticeStringRes(): StringResource {
+        return MR.strings.anilist_import_notice
+    }
+
+    override suspend fun getImportableList(): List<ImportableEntry> {
+        return getUserAnimeList().map { item ->
+            val mappedStatusFilter = when (item.status) {
+                "CURRENT", "REPEATING" -> ImportStatusFilter.WATCHING
+                "PLANNING" -> ImportStatusFilter.PLAN_TO_WATCH
+                "COMPLETED" -> ImportStatusFilter.COMPLETED
+                "PAUSED" -> ImportStatusFilter.ON_HOLD
+                else -> null
+            }
+            val alUserAnime = item.toALUserAnime()
+            ImportableEntry(
+                remoteId = item.media.id,
+                title = item.media.title.userPreferred ?: "",
+                coverUrl = item.media.coverImage.large ?: "",
+                totalEpisodes = (item.media.episodes ?: 0).toLong(),
+                episodesSeen = item.progress,
+                score = item.scoreRaw.toDouble(),
+                status = alUserAnime.toTrack().status,
+                statusFilter = mappedStatusFilter,
+                startDate = item.startedAt.toEpochMilli(),
+                finishDate = item.completedAt.toEpochMilli(),
+                trackingUrl = AnilistApi.animeUrl(item.media.id)
+            )
         }
     }
 }

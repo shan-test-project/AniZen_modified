@@ -93,6 +93,9 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="anizen" />
+                <data android:scheme="aniyomi" />
+                <data android:scheme="mihon" />
+                <data android:scheme="tachiyomi" />
                 <data android:host="add-repo" />
             </intent-filter>
 
@@ -229,6 +232,8 @@
                 <data android:host="myanimelist-auth" />
                 <data android:host="shikimori-auth" />
                 <data android:host="simkl-auth"/>
+                <data android:host="trakt-auth"/>
+                <data android:host="tmdb-auth"/>
             </intent-filter>
 
             <!-- Secondary filter for anizen scheme -->
@@ -243,6 +248,8 @@
                 <data android:host="myanimelist-auth" />
                 <data android:host="shikimori-auth" />
                 <data android:host="simkl-auth"/>
+                <data android:host="trakt-auth"/>
+                <data android:host="tmdb-auth"/>
             </intent-filter>
         </activity>
         <activity
@@ -294,8 +301,18 @@
             android:exported="false" />
 
         <receiver
+<<<<<<< HEAD
             android:name="mihon.feature.airingschedule.notification.ScheduleAlarmReceiver"
             android:exported="false" />
+=======
+            android:name=".data.updater.AppUpdateBroadcast"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="${applicationId}.SESSION_SELF_API_PACKAGE_INSTALLED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+>>>>>>> 7370286a10d78c4628370db3be0d47aacd83835c
 
         <service
             android:name=".extension.util.ExtensionInstallService"
@@ -322,7 +339,8 @@
 
         <service
             android:name=".util.LocalHttpServerService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -1,20 +1,34 @@
 package eu.kanade.presentation.history
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Panorama
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.compose.ui.unit.dp
+import eu.kanade.domain.ui.ContainerStyle
+import eu.kanade.domain.ui.UiPreferences
+import eu.kanade.domain.ui.model.PanoramaMode
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
+import eu.kanade.presentation.components.PanoramaModeToggle
 import eu.kanade.presentation.components.SearchToolbar
 import eu.kanade.presentation.components.relativeDateText
 import eu.kanade.presentation.history.components.HistoryItem
@@ -26,24 +40,14 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.presentation.core.components.ListGroupHeader
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
-import java.time.LocalDate
-
-import androidx.compose.material3.Surface
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.foundation.layout.Column
-import androidx.compose.ui.unit.dp
-
-import androidx.compose.runtime.getValue
-import eu.kanade.domain.ui.ContainerStyle
-import eu.kanade.domain.ui.UiPreferences
-import tachiyomi.presentation.core.util.collectAsState
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.time.LocalDate
 
 @Composable
 fun HistoryScreen(
@@ -56,19 +60,30 @@ fun HistoryScreen(
     navigateUp: (() -> Unit)?,
     searchQuery: String? = null,
 ) {
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val globalPanorama by uiPreferences.panoramaCover().collectAsStatePref() as State<Boolean>
+    val historyMode by uiPreferences.historyPanoramaMode().collectAsStatePref() as State<PanoramaMode>
+    val effectivePanorama = remember(globalPanorama, historyMode) { historyMode.resolve(globalPanorama) }
+
     Scaffold(
         topBar = { scrollBehavior ->
             SearchToolbar(
                 titleContent = { AppBarTitle(stringResource(MR.strings.history)) },
-                searchQuery = state.searchQuery,
+                searchQuery = searchQuery,
                 onChangeSearchQuery = onSearchQueryChange,
                 actions = {
+                    val panoramaMode by uiPreferences.historyPanoramaMode().collectAsStatePref() as State<PanoramaMode>
+                    PanoramaModeToggle(
+                        panoramaMode = panoramaMode,
+                        globalPanorama = globalPanorama,
+                        onPanoramaModeChange = { next ->
+                            uiPreferences.historyPanoramaMode().set(next)
+                        },
+                    )
                     AppBarActions(
-                        // KMK -->
                         persistentListOf<AppBar.AppBarAction>().builder()
                             .apply {
                                 add(
-                                    // KMK <--
                                     AppBar.Action(
                                         title = stringResource(MR.strings.pref_clear_history),
                                         icon = Icons.Outlined.DeleteSweep,
@@ -76,11 +91,9 @@ fun HistoryScreen(
                                             onDialogChange(HistoryScreenModel.Dialog.DeleteAll)
                                         },
                                     ),
-                                    // KMK -->
                                 )
                             }
                             .build(),
-                        // KMK <--
                     )
                 },
                 navigateUp = navigateUp,
@@ -110,6 +123,7 @@ fun HistoryScreen(
                     onClickCover = { history -> onClickCover(history.animeId) },
                     onClickResume = { history -> onClickResume(history.animeId, history.episodeId) },
                     onClickDelete = { item -> onDialogChange(HistoryScreenModel.Dialog.Delete(item)) },
+                    usePanorama = effectivePanorama,
                 )
             }
         }
@@ -123,114 +137,81 @@ private fun HistoryScreenContent(
     onClickCover: (HistoryWithRelations) -> Unit,
     onClickResume: (HistoryWithRelations) -> Unit,
     onClickDelete: (HistoryWithRelations) -> Unit,
+    usePanorama: Boolean,
 ) {
     val uiPreferences = remember { Injekt.get<UiPreferences>() }
-    val containerStyles by uiPreferences.containerStyles().collectAsState()
-    val useContainer = remember(containerStyles) { ContainerStyle.HISTORY in containerStyles }
+    val containerStyles by uiPreferences.containerStyles().collectAsStatePref() as State<Set<String>>
+    val useContainer = remember(containerStyles) { eu.kanade.domain.ui.ContainerStyle.HISTORY in containerStyles }
 
     FastScrollLazyColumn(
         contentPadding = contentPadding,
     ) {
         if (useContainer) {
-            var i = 0
-            while (i < history.size) {
-                val model = history[i]
-                if (model is HistoryUiModel.Header) {
-                    item(key = "historyHeader-${model.hashCode()}") {
+            items(
+                items = history,
+                key = { "history-${it.hashCode()}" },
+                contentType = {
+                    when (it) {
+                        is HistoryUiModel.Header -> "history_header"
+                        is HistoryUiModel.Item -> "history_item"
+                    }
+                },
+            ) { model ->
+                when (model) {
+                    is HistoryUiModel.Header -> {
                         ListGroupHeader(
                             modifier = Modifier,
                             text = relativeDateText(model.date),
                         )
                     }
-                    i++
-                    val groupItems = mutableListOf<HistoryWithRelations>()
-                    while (i < history.size && history[i] is HistoryUiModel.Item) {
-                        groupItems.add((history[i] as HistoryUiModel.Item).item)
-                        i++
-                    }
-                    item(key = "historyIsland-${model.hashCode()}") {
+                    is HistoryUiModel.Item -> {
                         Surface(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                                .fillMaxWidth(),
                             shape = MaterialTheme.shapes.large,
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            tonalElevation = 2.dp
+                            tonalElevation = 2.dp,
                         ) {
-                            Column {
-                                groupItems.forEach { historyItem ->
-                                    HistoryItem(
-                                        modifier = Modifier,
-                                        history = historyItem,
-                                        onClickCover = { onClickCover(historyItem) },
-                                        onClickResume = { onClickResume(historyItem) },
-                                        onClickDelete = { onClickDelete(historyItem) },
-                                    )
-                                }
+                            androidx.compose.foundation.layout.Column {
+                                HistoryItem(
+                                    modifier = Modifier,
+                                    history = model.item,
+                                    onClickCover = { onClickCover(model.item) },
+                                    onClickResume = { onClickResume(model.item) },
+                                    onClickDelete = { onClickDelete(model.item) },
+                                    usePanorama = usePanorama,
+                                )
                             }
                         }
                     }
-                } else if (model is HistoryUiModel.Item) {
-                    val value = model.item
-                    item(key = "history-${value.hashCode()}") {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                            shape = MaterialTheme.shapes.large,
-                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            tonalElevation = 2.dp
-                        ) {
-                            HistoryItem(
-                                modifier = Modifier,
-                                history = value,
-                                onClickCover = { onClickCover(value) },
-                                onClickResume = { onClickResume(value) },
-                                onClickDelete = { onClickDelete(value) },
-                            )
-                        }
-                    }
-                    i++
                 }
             }
         } else {
             items(
-                items = history.filterIsInstance<HistoryUiModel.Item>(),
-                key = { "history-${it.item.id}" },
+                items = history,
+                key = { "history-${it.hashCode()}" },
+                contentType = { "history" },
             ) { model ->
-                HistoryItem(
-                    modifier = Modifier,
-                    history = model.item,
-                    onClickCover = { onClickCover(model.item) },
-                    onClickResume = { onClickResume(model.item) },
-                    onClickDelete = { onClickDelete(model.item) },
-                )
+                when (model) {
+                    is HistoryUiModel.Header -> {
+                        ListGroupHeader(
+                            modifier = Modifier,
+                            text = relativeDateText(model.date),
+                        )
+                    }
+                    is HistoryUiModel.Item -> {
+                        HistoryItem(
+                            modifier = Modifier,
+                            history = model.item,
+                            onClickCover = { onClickCover(model.item) },
+                            onClickResume = { onClickResume(model.item) },
+                            onClickDelete = { onClickDelete(model.item) },
+                            usePanorama = usePanorama,
+                        )
+                    }
+                }
             }
         }
-    }
-}
-
-sealed interface HistoryUiModel {
-    data class Header(val date: LocalDate) : HistoryUiModel
-    data class Item(val item: HistoryWithRelations) : HistoryUiModel
-}
-
-@PreviewLightDark
-@Composable
-internal fun HistoryScreenPreviews(
-    @PreviewParameter(HistoryScreenModelStateProvider::class)
-    historyState: HistoryScreenModel.State,
-) {
-    TachiyomiPreviewTheme {
-        HistoryScreen(
-            state = historyState,
-            snackbarHostState = SnackbarHostState(),
-            searchQuery = null,
-            onSearchQueryChange = {},
-            onClickCover = {},
-            onClickResume = { _, _ -> run {} },
-            onDialogChange = {},
-            navigateUp = {},
-        )
     }
 }

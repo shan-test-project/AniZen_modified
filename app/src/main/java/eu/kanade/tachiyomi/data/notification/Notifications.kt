@@ -102,6 +102,7 @@ object Notifications {
     const val CHANNEL_EXTENSIONS_UPDATE = "ext_apk_update_channel"
     const val ID_UPDATES_TO_EXTS = -401
     const val ID_EXTENSION_INSTALLER = -402
+    const val ID_EXTENSION_PROGRESS = -403
 
     /**
      * Notification channel used for airing schedule episode alerts.

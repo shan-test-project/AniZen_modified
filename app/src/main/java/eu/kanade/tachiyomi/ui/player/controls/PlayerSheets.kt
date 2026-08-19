@@ -21,11 +21,16 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState as composeCollectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import dev.vivvvek.seeker.Segment
 import eu.kanade.tachiyomi.ui.player.Decoder
 import eu.kanade.tachiyomi.ui.player.Panels
 import eu.kanade.tachiyomi.ui.player.PlayerViewModel.VideoTrack
 import eu.kanade.tachiyomi.ui.player.Sheets
+import eu.kanade.tachiyomi.ui.player.controls.components.sheets.AspectRatioItem
+import eu.kanade.tachiyomi.ui.player.controls.components.sheets.AspectRatioSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.AudioTracksSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.ChaptersSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.HosterState
@@ -34,26 +39,31 @@ import eu.kanade.tachiyomi.ui.player.controls.components.sheets.PlaybackSpeedShe
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.QualitySheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.ScreenshotSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.SubtitlesSheet
-import kotlinx.collections.immutable.ImmutableList
-import kotlinx.collections.immutable.toImmutableList
+import eu.kanade.tachiyomi.ui.player.controls.components.sheets.VideoZoomSheet
+import eu.kanade.tachiyomi.ui.player.PlayerViewModel
+import eu.kanade.tachiyomi.ui.player.settings.PlayerPreferences
 import tachiyomi.domain.custombuttons.model.CustomButton
+import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.io.InputStream
 
 @Composable
 fun PlayerSheets(
     sheetShown: Sheets,
+    viewModel: PlayerViewModel,
 
     // subtitles sheet
-    subtitles: ImmutableList<VideoTrack>,
-    selectedSubtitles: ImmutableList<Int>,
+    subtitles: List<VideoTrack>,
+    selectedSubtitles: List<Int>,
     onAddSubtitle: (Uri) -> Unit,
-    onSelectSubtitle: (Int) -> Unit,
+    onSelectSubtitle: (VideoTrack) -> Unit,
 
     // audio sheet
-    audioTracks: ImmutableList<VideoTrack>,
+    audioTracks: List<VideoTrack>,
     selectedAudio: Int,
     onAddAudio: (Uri) -> Unit,
-    onSelectAudio: (Int) -> Unit,
+    onSelectAudio: (VideoTrack) -> Unit,
 
     // video sheet
     isLoadingHosters: Boolean,
@@ -62,11 +72,14 @@ fun PlayerSheets(
     selectedVideoIndex: Pair<Int, Int>,
     onClickHoster: (Int) -> Unit,
     onClickVideo: (Int, Int) -> Unit,
+    defaultStreamSelector: String,
+    highlightDefaultStream: Boolean = true,
+    autoScrollToDefault: Boolean,
     displayHosters: Pair<Boolean, Boolean>,
 
     // chapters sheet
     chapter: Segment?,
-    chapters: ImmutableList<Segment>,
+    chapters: List<Segment>,
     onSeekToChapter: (Int) -> Unit,
 
     // Decoders sheet
@@ -80,7 +93,7 @@ fun PlayerSheets(
     // More sheet
     sleepTimerTimeRemaining: Int,
     onStartSleepTimer: (Int) -> Unit,
-    buttons: ImmutableList<CustomButton>,
+    buttons: List<CustomButton>,
 
     // Screenshot sheet
     showSubtitles: Boolean,
@@ -106,7 +119,7 @@ fun PlayerSheets(
                 onAddSubtitle(it)
             }
             SubtitlesSheet(
-                tracks = subtitles.toImmutableList(),
+                tracks = subtitles,
                 selectedTracks = selectedSubtitles,
                 onSelect = onSelectSubtitle,
                 onAddSubtitle = { subtitlesPicker.launch(arrayOf("*/*")) },
@@ -141,6 +154,11 @@ fun PlayerSheets(
                 selectedVideoIndex = selectedVideoIndex,
                 onClickHoster = onClickHoster,
                 onClickVideo = onClickVideo,
+                onEnsureHosterExpanded = viewModel::ensureHosterExpanded,
+                defaultStreamSelector = defaultStreamSelector,
+                highlightDefaultStream = highlightDefaultStream,
+                autoScrollToDefault = autoScrollToDefault,
+                sheetActive = sheetShown == Sheets.QualityTracks,
                 displayHosters = displayHosters,
                 onDismissRequest = onDismissRequest,
                 dismissSheet = dismissSheet,
@@ -155,6 +173,45 @@ fun PlayerSheets(
                 onClick = { onSeekToChapter(chapters.indexOf(it)) },
                 onDismissRequest = onDismissRequest,
                 dismissSheet = dismissSheet,
+            )
+        }
+
+        Sheets.AspectRatios -> {
+            val playerPreferences = remember { Injekt.get<PlayerPreferences>() }
+            val customRatiosSet by playerPreferences.customAspectRatios().collectAsState()
+            val customRatios = customRatiosSet.mapNotNull { 
+                val parts = it.split("|")
+                if (parts.size == 2) {
+                    val ratio = parts[1].toDoubleOrNull()
+                    if (ratio != null) AspectRatioItem(parts[0], ratio, true) else null
+                } else null
+            }
+            
+            val currentRatio = viewModel.videoAspectOverride.composeCollectAsState().value
+
+            AspectRatioSheet(
+                currentRatio = currentRatio,
+                customRatios = customRatios,
+                onSelectRatio = { ratio ->
+                    viewModel.setCustomVideoAspect(ratio.ratio, ratio.label)
+                },
+                onAddCustomRatio = { label, ratio ->
+                    playerPreferences.customAspectRatios().set(customRatiosSet + "$label|$ratio")
+                },
+                onDeleteCustomRatio = { item ->
+                    val toRemove = customRatiosSet.firstOrNull { it.startsWith("${item.label}|") }
+                    if (toRemove != null) {
+                        playerPreferences.customAspectRatios().set(customRatiosSet - toRemove)
+                    }
+                },
+                onDismissRequest = onDismissRequest,
+            )
+        }
+
+        Sheets.VideoZoom -> {
+            VideoZoomSheet(
+                viewModel = viewModel,
+                onDismissRequest = onDismissRequest,
             )
         }
 

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
@@ -79,10 +80,10 @@ fun CastSheet(
                 LazyColumn(
                     modifier = Modifier.height(120.dp),
                 ) {
-                    items(
+                    itemsIndexed(
                         items = devices,
-                        key = { "cast-device-${it.id}" }
-                    ) { device ->
+                        key = { index, it -> "cast-device-${it.id}-$index" }
+                    ) { _, device ->
                         ListItem(
                             headlineContent = {
                                 Text(
@@ -155,10 +156,10 @@ fun CastSheet(
                             modifier = Modifier.height(120.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            items(
+                            itemsIndexed(
                                 items = queueItems,
-                                key = { "cast-sheet-${it.itemId}" }
-                            ) { item ->
+                                key = { index, it -> "cast-sheet-${it.itemId}-$index" }
+                            ) { _, item ->
                                 QueueItemRow(item = item, castManager = castManager)
                             }
                         }

@@ -17,54 +17,40 @@
 
 package eu.kanade.tachiyomi.ui.player.controls
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AspectRatio
-import androidx.compose.material.icons.filled.PictureInPictureAlt
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import eu.kanade.tachiyomi.ui.player.controls.components.ControlsButton
-import eu.kanade.tachiyomi.ui.player.controls.components.FilledControlsButton
-import eu.kanade.tachiyomi.ui.player.execute
-import eu.kanade.tachiyomi.ui.player.executeLongPress
-import tachiyomi.domain.custombuttons.model.CustomButton
+import eu.kanade.tachiyomi.ui.player.CastManager
+import eu.kanade.tachiyomi.ui.player.PlayerButton
+import eu.kanade.tachiyomi.ui.player.PlayerViewModel
+import tachiyomi.presentation.core.components.material.padding
 
 @Composable
 fun BottomRightPlayerControls(
-    customButton: CustomButton?,
-    customButtonTitle: String,
-    skipIntroButton: String?,
-    onPressSkipIntroButton: () -> Unit,
-    isPipAvailable: Boolean,
-    onAspectClick: () -> Unit,
-    onPipClick: () -> Unit,
+    buttons: List<PlayerButton>,
+    viewModel: PlayerViewModel,
+    castManager: CastManager,
+    onBackPress: () -> Unit,
+    onCastClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier) {
-        if (skipIntroButton != null) {
-            FilledControlsButton(
-                text = skipIntroButton,
-                onClick = onPressSkipIntroButton,
-                onLongClick = {},
-            )
-        } else if (customButton != null) {
-            FilledControlsButton(
-                text = customButtonTitle,
-                onClick = customButton::execute,
-                onLongClick = customButton::executeLongPress,
-            )
-        }
-
-        if (isPipAvailable) {
-            ControlsButton(
-                Icons.Default.PictureInPictureAlt,
-                onClick = onPipClick,
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall)
+    ) {
+        buttons.forEach { button ->
+            RenderPlayerButton(
+                button = button,
+                viewModel = viewModel,
+                castManager = castManager,
+                onBackPress = onBackPress,
+                onCastClick = onCastClick,
+                containerButtons = buttons,
             )
         }
-
-        ControlsButton(
-            Icons.Default.AspectRatio,
-            onClick = onAspectClick,
-        )
     }
 }

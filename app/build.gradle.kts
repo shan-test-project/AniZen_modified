@@ -21,80 +21,37 @@ if (Config.includeTelemetry && file("google-services.json").exists()) {
     }
 }
 
-    shortcutHelper.setFilePath("./shortcuts.xml")
+shortcutHelper.setFilePath("./shortcuts.xml")
 
+android {
+    namespace = "eu.kanade.tachiyomi"
 
+    signingConfigs {
+        create("release") {
+            val props = Properties()
+            val propFile = file("../signing.properties")
+            if (propFile.exists()) {
+                propFile.inputStream().use { props.load(it) }
+            }
 
+            storeFile = file("anizen.jks")
+            storePassword = props.getProperty("storePassword") ?: System.getenv("SIGNING_STORE_PASSWORD") ?: ""
+            keyAlias = props.getProperty("keyAlias") ?: System.getenv("SIGNING_KEY_ALIAS") ?: ""
+            keyPassword = props.getProperty("keyPassword") ?: System.getenv("SIGNING_KEY_PASSWORD") ?: ""
 
-    android {
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
 
-        namespace = "eu.kanade.tachiyomi"
+    compileSdk = 36
 
-
-
-                                signingConfigs {
-
-
-
-                                    create("release") {
-
-
-
-                                        val props = Properties()
-
-
-
-                                        val propFile = file("../signing.properties")
-
-
-
-                                        if (propFile.exists()) {
-
-
-
-                                            propFile.inputStream().use { props.load(it) }
-
-
-
-                                        }
-
-
-
-                        
-
-
-
-                                        storeFile = file("anizen.jks")
-
-
-
-                                        storePassword = props.getProperty("storePassword") ?: System.getenv("SIGNING_STORE_PASSWORD") ?: ""
-
-
-
-                                        keyAlias = props.getProperty("keyAlias") ?: System.getenv("SIGNING_KEY_ALIAS") ?: ""
-
-
-
-                                        keyPassword = props.getProperty("keyPassword") ?: System.getenv("SIGNING_KEY_PASSWORD") ?: ""
-
-
-
-                                    }
-
-
-
-                                }
-
-
-
-        defaultConfig {
-
-
+    defaultConfig {
         applicationId = "app.anizen"
 
-        versionCode = 574
-        versionName = "0.5.74"
+        versionCode = 705
+        versionName = "0.5.205"
 
         manifestPlaceholders["author"] = "@salmanbappi"
 
@@ -102,6 +59,10 @@ if (Config.includeTelemetry && file("google-services.json").exists()) {
         buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
         buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
+
+        minSdk = 26
+        targetSdk = 36
+
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -131,35 +92,33 @@ if (Config.includeTelemetry && file("google-services.json").exists()) {
 
         val commonMatchingFallbacks = listOf(release.name)
 
-        create("releaseTest") {
+        maybeCreate("releaseTest").apply {
             initWith(release)
 
             applicationIdSuffix = ".rt"
-            isMinifyEnabled = false
-            isShrinkResources = false
 
             matchingFallbacks.addAll(commonMatchingFallbacks)
         }
-        create("foss") {
+        maybeCreate("foss").apply {
             initWith(release)
 
             applicationIdSuffix = ".foss"
 
             matchingFallbacks.addAll(commonMatchingFallbacks)
         }
-        create("preview") {
+        getByName("preview").apply {
             initWith(release)
 
             applicationIdSuffix = ".beta"
 
             versionNameSuffix = debug.versionNameSuffix
-            signingConfig = debug.signingConfig
+            signingConfig = release.signingConfig
 
             matchingFallbacks.addAll(commonMatchingFallbacks)
 
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
         }
-        create("benchmark") {
+        getByName("benchmark").apply {
             initWith(release)
 
             isDebuggable = false
@@ -244,7 +203,7 @@ if (Config.includeTelemetry && file("google-services.json").exists()) {
         buildConfig = true
 
         // Disable some unused things
-        aidl = false
+        aidl = true
         renderScript = false
         shaders = false
     }
@@ -252,6 +211,15 @@ if (Config.includeTelemetry && file("google-services.json").exists()) {
     lint {
         abortOnError = false
         checkReleaseBuilds = false
+    }
+
+    applicationVariants.all {
+        if (buildType.name == "preview") {
+            outputs.all {
+                val output = this as? com.android.build.gradle.api.ApkVariantOutput
+                output?.versionNameOverride = "r-${getCommitCount()}"
+            }
+        }
     }
 }
 
@@ -461,4 +429,4 @@ buildscript {
     dependencies {
         classpath(kotlinx.gradle)
     }
-}// Trigger build Tue Feb 17 19:30:12 +06 2026
+}// Trigger build Sun Mar 29 21:15:36 +06 2026

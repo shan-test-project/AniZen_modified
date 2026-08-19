@@ -34,15 +34,15 @@ class TrackPreferences(
 
     fun trackToken(tracker: Tracker) = preferenceStore.getString(Preference.privateKey("track_token_${tracker.id}"), "")
 
+    fun trackApiKey(tracker: Tracker) = preferenceStore.getString(Preference.privateKey("track_api_key_${tracker.id}"), "")
+
     fun anilistScoreType() = preferenceStore.getString("anilist_score_type", Anilist.POINT_10)
 
     fun autoUpdateTrack() = preferenceStore.getBoolean("pref_auto_update_manga_sync_key", true)
 
+    fun autoSyncFromTrackers() = preferenceStore.getBoolean("pref_auto_sync_from_trackers", true)
+
     fun trackOnAddingToLibrary() = preferenceStore.getBoolean("track_on_adding_to_library", true)
-
-    fun autoAddTrack() = preferenceStore.getBoolean("auto_add_track", false)
-
-    fun autoTrackWhenWatching() = preferenceStore.getBoolean("pref_auto_track_when_watching", true)
 
     fun showNextEpisodeAiringTime() = preferenceStore.getBoolean(
         "show_next_episode_airing_time",

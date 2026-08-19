@@ -54,11 +54,12 @@ internal class ExtensionApi {
                 .newCall(GET("$repoBaseUrl/index.min.json"))
                 .awaitSuccess()
 
-            val regex = """https://raw.githubusercontent.com/(.+?)/.+""".toRegex()
-            val author = regex.find(repoBaseUrl)?.let {
-                val (user) = it.destructured
-                "@$user"
-            } ?: extRepo.shortName ?: extRepo.name
+            val repoHostAuthorRegex = """^https://(?:raw\.githubusercontent\.com|codeberg\.org|gitlab\.com)/([^/]+)/.*""".toRegex()
+            val author = extRepo.author
+                ?: repoHostAuthorRegex.find(repoBaseUrl)?.let {
+                    val (user) = it.destructured
+                    "@$user"
+                } ?: extRepo.shortName ?: extRepo.name
 
             with(json) {
                 response
@@ -116,6 +117,7 @@ internal class ExtensionApi {
     }
 
     private fun List<ExtensionJsonObject>.toExtensions(repoUrl: String, author: String): List<Extension.Available> {
+        val normalizedRepoUrl = repoUrl.substringBefore("/index.min.json").removeSuffix("/")
         return this
             .filter {
                 val libVersion = it.extractLibVersion()
@@ -133,15 +135,19 @@ internal class ExtensionApi {
                     isTorrent = it.torrent == 1,
                     sources = it.sources?.map(extensionSourceMapper).orEmpty(),
                     apkName = it.apk,
-                    iconUrl = "$repoUrl/icon/${it.pkg}.png",
-                    repoUrl = repoUrl,
+                    iconUrl = "${normalizedRepoUrl}/icon/${it.pkg}.png",
+                    repoUrl = normalizedRepoUrl,
                     author = author,
                 )
             }
     }
 
     fun getApkUrl(extension: Extension.Available): String {
-        return "${extension.repoUrl}/apk/${extension.apkName}"
+        return if (extension.apkName.startsWith("http")) {
+            extension.apkName
+        } else {
+            "${extension.repoUrl}/apk/${extension.apkName}"
+        }
     }
 
     private fun ExtensionJsonObject.extractLibVersion(): Double {

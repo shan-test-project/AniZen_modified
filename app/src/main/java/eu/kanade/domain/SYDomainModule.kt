@@ -81,6 +81,7 @@ class SYDomainModule : InjektModule {
 //        addFactory { SearchEngine() }
 //        addFactory { IsTrackUnfollowed() }
         addFactory { GetSeenAnimeNotInLibraryView(get()) }
+        addFactory { mihon.domain.migration.interactor.MigrateAnimeUseCase(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
         addSingletonFactory<AnimeMergeRepository> { AnimeMergeRepositoryImpl(get()) }
         addFactory { GetMergedAnime(get()) }
@@ -89,7 +90,7 @@ class SYDomainModule : InjektModule {
         addFactory { GetMergedEpisodesByAnimeId(get(), get()) }
         addFactory { GetSeasonsByAnimeId(get(), get()) }
         addFactory { DeleteSeason(get()) }
-        addFactory { DiscoverSeasons(get(), get()) }
+        addFactory { DiscoverSeasons(get(), get(), get()) }
 //        addFactory { InsertMergedReference(get()) }
         addFactory { UpdateMergedSettings(get()) }
         addFactory { DeleteByMergeId(get()) }

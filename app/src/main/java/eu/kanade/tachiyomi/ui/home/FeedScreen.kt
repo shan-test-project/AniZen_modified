@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
@@ -32,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -43,6 +45,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import eu.kanade.domain.ui.UiPreferences
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import eu.kanade.presentation.anime.components.AnimeCover
 import eu.kanade.presentation.components.AppBar
 import kotlinx.coroutines.launch
@@ -63,11 +69,14 @@ import tachiyomi.presentation.core.util.secondaryItemAlpha
 @Composable
 fun FeedScreen(
     screenModel: FeedScreenModel,
-    onAnimeClick: (Anime, Long?) -> Unit,
+    onAnimeClick: (Anime, Long) -> Unit,
     onAddSourceClick: () -> Unit,
-    contentPadding: PaddingValues = PaddingValues(0.dp),
+    onSeeAllClick: (FeedScreenModel.FeedItem) -> Unit,
+    contentPadding: PaddingValues,
+    usePanorama: Boolean,
 ) {
     val state by screenModel.state.collectAsState()
+
     val scope = rememberCoroutineScope()
 
     if (state.categories.isEmpty()) {
@@ -75,7 +84,16 @@ fun FeedScreen(
         return
     }
 
-    val visibleCategories = state.categories
+    val visibleCategories = remember(state.categories, state.items) {
+        if (state.categories.size <= 1) {
+            state.categories
+        } else {
+            state.categories.filterNot { category ->
+                category.name == "Global" && state.items[category.id].isNullOrEmpty()
+            }
+        }
+    }
+    
     val pagerState = rememberPagerState { visibleCategories.size }
 
     // Use derivedStateOf for smooth tab tracking at high refresh rates
@@ -184,14 +202,16 @@ fun FeedScreen(
                     contentPadding = listPadding,
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
-                    items(
+                    itemsIndexed(
                         items = items,
-                        key = { "feed-${it.feed.id}" },
-                        contentType = { "feed_island" }
-                    ) { item ->
+                        key = { _, it -> "feed-${it.feed.id}" },
+                        contentType = { _, _ -> "feed_island" }
+                    ) { _, item ->
                         FeedIsland(
                             item = item,
                             onAnimeClick = { onAnimeClick(it, item.feed.id) },
+                            onSeeAllClick = { onSeeAllClick(item) },
+                            usePanorama = usePanorama,
                         )
                     }
                 }
@@ -204,6 +224,8 @@ fun FeedScreen(
 private fun FeedIsland(
     item: FeedScreenModel.FeedItem,
     onAnimeClick: (Anime) -> Unit,
+    onSeeAllClick: () -> Unit,
+    usePanorama: Boolean,
 ) {
     // Memoize the title to avoid re-generating strings on every scroll frame
     val title = remember(item.feed.id, item.feed.type, item.savedSearch?.id) {
@@ -223,14 +245,41 @@ private fun FeedIsland(
         Column(
             modifier = Modifier.padding(vertical = 12.dp)
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                if (item.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp)
+                            .size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+                
+                androidx.compose.material3.TextButton(
+                    onClick = onSeeAllClick,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        text = "See all",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
             
             if (item.animeList.isEmpty()) {
                 // PULSING PLACEHOLDERS INSIDE THE SECTION WHILE FETCHING
@@ -249,15 +298,17 @@ private fun FeedIsland(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(
+                    itemsIndexed(
                         items = item.animeList,
-                        key = { anime -> "anime-${item.feed.id}-${anime.id}" },
-                        contentType = { "anime_card" }
-                    ) { anime ->
+                        key = { _, anime -> "anime-${item.feed.id}-${anime.id}" },
+                        contentType = { _, _ -> "anime_card" }
+                    ) { _, anime ->
                         FeedCard(
                             anime = anime,
-                            onClick = { onAnimeClick(anime) }
+                            onClick = { onAnimeClick(anime) },
+                            usePanorama = usePanorama,
                         )
+
                     }
                 }
             }
@@ -269,8 +320,9 @@ private fun FeedIsland(
 private fun FeedCard(
     anime: Anime,
     onClick: () -> Unit,
+    usePanorama: Boolean,
 ) {
-    val (entry, ratio) = AnimeCover.getEntry(anime.id)
+    val (entry, ratio) = AnimeCover.getEntry(anime.id, usePanoramaOverride = usePanorama)
     val width = if (entry == AnimeCover.Panorama) 200.dp else 100.dp
 
     Column(

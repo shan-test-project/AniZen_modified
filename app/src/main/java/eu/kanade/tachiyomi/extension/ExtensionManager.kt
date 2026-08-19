@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.drawable.Drawable
 import eu.kanade.domain.extension.interactor.TrustExtension
 import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.extension.api.ExtensionApi
 import eu.kanade.tachiyomi.extension.api.ExtensionUpdateNotifier
 import eu.kanade.tachiyomi.extension.model.Extension
@@ -12,6 +13,7 @@ import eu.kanade.tachiyomi.extension.model.LoadResult
 import eu.kanade.tachiyomi.extension.util.ExtensionInstallReceiver
 import eu.kanade.tachiyomi.extension.util.ExtensionInstaller
 import eu.kanade.tachiyomi.extension.util.ExtensionLoader
+import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -65,11 +68,11 @@ class ExtensionManager(
     /**
      * The installer which installs, updates and uninstalls the anime extensions.
      */
-    private val installer by lazy { ExtensionInstaller(context) }
+    private val installer: ExtensionInstaller = Injekt.get()
 
     private val iconMap = mutableMapOf<String, Drawable>()
 
-    private val githubRegex = """https://raw.githubusercontent.com/(.+?)/.+""".toRegex()
+    private val repoHostAuthorRegex = """^https://(?:raw\.githubusercontent\.com|codeberg\.org|gitlab\.com)/([^/]+)/.*""".toRegex()
 
     private val installedExtensionsMapFlow = MutableStateFlow(emptyMap<String, Extension.Installed>())
     val installedExtensionsFlow = combine(
@@ -77,12 +80,16 @@ class ExtensionManager(
         extensionRepoRepository.subscribeAll(),
     ) { installedMap, repos ->
         installedMap.values.map { extension ->
-            val matchingRepo = repos.find { it.signingKeyFingerprint == extension.signatureHash }
-            val author = matchingRepo?.let { repo ->
-                githubRegex.find(repo.baseUrl)?.let { match ->
-                    "@${match.groupValues[1]}"
-                } ?: repo.shortName ?: repo.name
-            } ?: extension.author
+            val matchingRepo = repos.find {
+                it.signingKeyFingerprint.equals(extension.signatureHash, ignoreCase = true) ||
+                it.signingKeyFingerprint.padStart(64, '0').equals(extension.signatureHash.padStart(64, '0'), ignoreCase = true)
+            }
+            val author = matchingRepo?.author
+                ?: matchingRepo?.let { repo ->
+                    repoHostAuthorRegex.find(repo.baseUrl)?.let { match ->
+                        "@${match.groupValues[1]}"
+                    } ?: repo.shortName ?: repo.name
+                } ?: extension.author
 
             extension.copy(author = author)
         }
@@ -353,23 +360,27 @@ class ExtensionManager(
         override fun onExtensionInstalled(extension: Extension.Installed) {
             registerNewExtension(extension.withUpdateCheck())
             updatePendingUpdatesCount()
+            installer.dismissInstallNotification(extension.pkgName)
         }
 
         override fun onExtensionUpdated(extension: Extension.Installed) {
             registerUpdatedExtension(extension.withUpdateCheck())
             updatePendingUpdatesCount()
+            installer.dismissInstallNotification(extension.pkgName)
         }
 
         override fun onExtensionUntrusted(extension: Extension.Untrusted) {
             installedExtensionsMapFlow.value -= extension.pkgName
             untrustedExtensionsMapFlow.value += extension
             updatePendingUpdatesCount()
+            installer.dismissInstallNotification(extension.pkgName)
         }
 
         override fun onPackageUninstalled(pkgName: String) {
             ExtensionLoader.uninstallPrivateExtension(context, pkgName)
             unregisterAnimeExtension(pkgName)
             updatePendingUpdatesCount()
+            installer.dismissInstallNotification(pkgName)
         }
     }
 

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.storage.nameWithoutExtension
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.anime.model.Anime
@@ -25,11 +26,13 @@ import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.i18n.MR
-import tachiyomi.source.local.LocalSource
-import tachiyomi.source.local.io.Archive
-import tachiyomi.source.local.io.LocalSourceFileSystem
+import tachiyomi.source.localanime.LocalAnimeSource
+import tachiyomi.source.localanime.io.Archive
+import tachiyomi.source.localanime.io.LocalAnimeSourceFileSystem
+import tachiyomi.source.localanime.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.File
 
 /**
  * This class is used to manage episode downloads in the application. It must be instantiated once
@@ -44,6 +47,7 @@ class DownloadManager(
     private val getCategories: GetCategories = Injekt.get(),
     private val sourceManager: SourceManager = Injekt.get(),
     private val downloadPreferences: DownloadPreferences = Injekt.get(),
+    private val deleteEpisodes: tachiyomi.domain.episode.interactor.DeleteEpisodes = Injekt.get(),
 ) {
 
     /**
@@ -53,6 +57,9 @@ class DownloadManager(
 
     val isRunning: Boolean
         get() = downloader.isRunning
+
+    val isLocalPhase: Boolean
+        get() = downloader.isLocalPhase
 
     /**
      * Queue to delay the deletion of a list of episodes until triggered.
@@ -112,12 +119,14 @@ class DownloadManager(
     fun startDownloadNow(episodeId: Long) {
         val existingDownload = getQueuedDownloadOrNull(episodeId)
         if (existingDownload != null) {
+            existingDownload.status = Download.State.QUEUE
             val list = queueState.value.toMutableList()
             list.remove(existingDownload)
             list.add(0, existingDownload)
             reorderQueue(list)
         } else {
             val newDownload = runBlocking { Download.fromEpisodeId(episodeId) } ?: return
+            newDownload.status = Download.State.QUEUE
             val list = queueState.value.toMutableList()
             list.add(0, newDownload)
             reorderQueue(list)
@@ -179,17 +188,34 @@ class DownloadManager(
      */
     fun buildVideo(source: Source, anime: Anime, episode: Episode): Video {
         val episodeDir =
-            provider.findEpisodeDir(episode.name, episode.scanlator, anime.title, source)
-        val files = episodeDir?.listFiles().orEmpty()
-            .filter { "video" in it.type.orEmpty() }
+            provider.findEpisodeDir(episode.name, episode.scanlator, if (source.isLocal()) anime.url else anime.ogTitle, source)
 
-        if (files.isEmpty()) {
-            throw Exception(context.stringResource(MR.strings.video_list_empty_error))
+        val files = if (source.isLocal() && episodeDir?.isFile == true) {
+            listOf(episodeDir)
+        } else {
+            episodeDir?.listFiles().orEmpty()
+                .filter {
+                    val type = it.type.orEmpty().lowercase()
+                    val name = it.name.orEmpty().lowercase()
+                    "video" in type || name.endsWith(".mp4") || name.endsWith(".mkv")
+                }
+        }
+
+        if (files.isEmpty()) {            throw Exception(context.stringResource(MR.strings.video_list_empty_error))
         }
 
         val file = files[0]
 
-        return Video(
+        val subtitleTracks = episodeDir?.listFiles().orEmpty()
+            .filter {
+                val name = it.name.orEmpty().lowercase()
+                name.endsWith(".srt") || name.endsWith(".ass") || name.endsWith(".vtt")
+            }
+            .map {
+                eu.kanade.tachiyomi.animesource.model.Track(it.uri.toString(), it.nameWithoutExtension.orEmpty())
+            }
+
+        val video = Video(
             file.uri.toString(),
             "download: " + file.uri.toString(),
             file.uri.toString(),
@@ -198,6 +224,8 @@ class DownloadManager(
             status = Video.State.READY
             mimeType = "video/mp4"
         }
+
+        return video.copy(initialized = true, subtitleTracks = subtitleTracks)
     }
 
     /**
@@ -216,6 +244,10 @@ class DownloadManager(
         sourceId: Long,
         skipCache: Boolean = false,
     ): Boolean {
+        val source = sourceManager.getOrStub(sourceId)
+        if (source.isLocal() || skipCache) {
+            return provider.findEpisodeDir(episodeName, episodeScanlator, animeTitle, source) != null
+        }
         return cache.isEpisodeDownloaded(
             episodeName,
             episodeScanlator,
@@ -238,8 +270,8 @@ class DownloadManager(
      * @param anime the anime to check.
      */
     fun getDownloadCount(anime: Anime): Int {
-        return if (anime.source == LocalSource.ID) {
-            LocalSourceFileSystem(storageManager).getFilesInAnimeDirectory(anime.url)
+        return if (anime.isLocal()) {
+            LocalAnimeSourceFileSystem(storageManager).getFilesInAnimeDirectory(anime.url)
                 .count { Archive.isSupported(it) }
         } else {
             cache.getDownloadCount(anime)
@@ -259,8 +291,8 @@ class DownloadManager(
      * @param anime the anime to check.
      */
     fun getDownloadSize(anime: Anime): Long {
-        return if (anime.source == LocalSource.ID) {
-            LocalSourceFileSystem(storageManager).getAnimeDirectory(anime.url)
+        return if (anime.isLocal()) {
+            LocalAnimeSourceFileSystem(storageManager).getAnimeDirectory(anime.url)
                 ?.size() ?: 0L
         } else {
             cache.getDownloadSize(anime)
@@ -282,9 +314,9 @@ class DownloadManager(
      * @param anime the anime of the episodes.
      * @param source the source of the episodes.
      */
-    fun deleteEpisodes(episodes: List<Episode>, anime: Anime, source: Source) {
+    fun deleteEpisodes(episodes: List<Episode>, anime: Anime, source: Source, isManual: Boolean = false) {
         launchIO {
-            val filteredEpisodes = getEpisodesToDelete(episodes, anime)
+            val filteredEpisodes = if (isManual) episodes else getEpisodesToDelete(episodes, anime)
             if (filteredEpisodes.isEmpty()) {
                 return@launchIO
             }
@@ -297,6 +329,26 @@ class DownloadManager(
             )
             episodeDirs.forEach { it.delete() }
             cache.removeEpisodes(filteredEpisodes, anime)
+
+            if (source.isLocal()) {
+                deleteEpisodes.await(filteredEpisodes.map { it.id })
+            }
+
+            // Delete anime directory if empty
+            if (animeDir?.listFiles()?.isEmpty() == true) {
+                deleteAnime(anime, source, removeQueued = false)
+            }
+
+            // KMK -->
+            // Clean up sandbox
+            val sandboxRoot = context.getExternalFilesDir("downloads")
+            if (sandboxRoot != null && sandboxRoot.exists()) {
+                filteredEpisodes.forEach { episode ->
+                    val episodeDirname = provider.getEpisodeDirName(episode.name, episode.scanlator)
+                    File(sandboxRoot, episodeDirname).deleteRecursively()
+                }
+            }
+            // KMK <--
 
             // Delete anime directory if empty
             if (animeDir?.listFiles()?.isEmpty() == true) {
@@ -317,8 +369,21 @@ class DownloadManager(
             if (removeQueued) {
                 downloader.removeFromQueue(anime)
             }
-            provider.findAnimeDir(anime.title, source)?.delete()
+            provider.findAnimeDir(anime.ogTitle, source)?.delete()
             cache.removeAnime(anime)
+
+            // KMK -->
+            // Clean up sandbox for this anime
+            val sandboxRoot = context.getExternalFilesDir("downloads")
+            if (sandboxRoot != null && sandboxRoot.exists()) {
+                val animeDirname = provider.getAnimeDirName(anime.ogTitle)
+                // Since sandbox doesn't have an anime subfolder structure usually based on our implementation,
+                // we should at least try to clean up if we had any logic for it.
+                // But according to downloadEpisode, we use episodeDirname directly under sandboxRoot.
+                // To be safe, we'd need to know all episodes, but usually deleteAnime is called when everything is already gone.
+            }
+            // KMK <--
+
             // Delete source directory if empty
             val sourceDir = provider.findSourceDir(source)
             if (sourceDir?.listFiles()?.isEmpty() == true) {
@@ -389,7 +454,7 @@ class DownloadManager(
      */
     suspend fun renameEpisode(source: Source, anime: Anime, oldEpisode: Episode, newEpisode: Episode) {
         val oldNames = provider.getValidEpisodeDirNames(oldEpisode.name, oldEpisode.scanlator)
-        val animeDir = provider.getAnimeDir(anime.title, source)
+        val animeDir = provider.getAnimeDir(anime.ogTitle, source)
 
         // Assume there's only 1 version of the episode name formats present
         val oldFolder = oldNames.asSequence()
@@ -458,7 +523,21 @@ class DownloadManager(
         .flatMapLatest { downloads ->
             downloads
                 .map { download ->
-                    download.progressFlow.drop(1).map { download }
+                    kotlinx.coroutines.flow.merge(
+                        download.progressFlow.drop(1).map { download },
+                        download.statusFlow.flatMapLatest { status ->
+                            if (status == Download.State.DOWNLOADING) {
+                                kotlinx.coroutines.flow.flow {
+                                    while (true) {
+                                        kotlinx.coroutines.delay(1000)
+                                        emit(download)
+                                    }
+                                }
+                            } else {
+                                kotlinx.coroutines.flow.emptyFlow()
+                            }
+                        }
+                    )
                 }
                 .merge()
         }

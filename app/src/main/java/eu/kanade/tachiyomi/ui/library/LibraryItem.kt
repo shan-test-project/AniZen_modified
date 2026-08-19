@@ -12,8 +12,15 @@ data class LibraryItem(
     val unseenCount: Long = -1,
     val isLocal: Boolean = false,
     val sourceLanguage: String = "",
-    private val sourceManager: SourceManager = Injekt.get(),
+    val showSourceIcon: Boolean = false,
+    val showLanguageIcon: Boolean = false,
+    val domainSource: tachiyomi.domain.source.model.Source? = null,
 ) {
+    private val sourceManager: SourceManager = Injekt.get()
+
+    val source by lazy { sourceManager.getOrStub(libraryAnime.anime.source) }
+    val sourceName by lazy { source.getNameForAnimeInfo() }
+
     /**
      * Checks if a query matches the anime
      *
@@ -21,7 +28,6 @@ data class LibraryItem(
      * @return true if the anime matches the query, false otherwise.
      */
     fun matches(constraint: String): Boolean {
-        val sourceName by lazy { sourceManager.getOrStub(libraryAnime.anime.source).getNameForAnimeInfo() }
         return libraryAnime.anime.title.contains(constraint, true) ||
             (libraryAnime.anime.author?.contains(constraint, true) ?: false) ||
             (libraryAnime.anime.artist?.contains(constraint, true) ?: false) ||
@@ -53,3 +59,4 @@ data class LibraryItem(
         }
     }
 }
+

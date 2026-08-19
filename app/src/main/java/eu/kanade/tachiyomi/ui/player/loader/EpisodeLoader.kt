@@ -15,17 +15,19 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import tachiyomi.domain.anime.model.Anime
 import tachiyomi.domain.episode.model.Episode
-import tachiyomi.source.local.LocalSource
-import tachiyomi.source.local.io.LocalSourceFileSystem
+import tachiyomi.source.localanime.LocalAnimeSource
+import tachiyomi.source.localanime.io.LocalAnimeSourceFileSystem
+import eu.kanade.tachiyomi.util.subtitles.StremioSubtitleResolver
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+
+import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 
 /**
  * Loader used to retrieve the hosters for a given episode.
  */
 class EpisodeLoader {
     companion object {
-        private val hasHosterListMethod = mutableMapOf<String, Boolean>()
 
         /**
          * Returns a list of hosters of an [episode] based on the type of [source] used.
@@ -35,11 +37,11 @@ class EpisodeLoader {
          * @param source the source of the anime.
          */
         suspend fun getHosters(episode: Episode, anime: Anime, source: AnimeSource): List<Hoster> {
-            val isDownloaded = isDownload(episode, anime, skipCache = false)
+            val isDownloaded = isDownload(episode, anime)
             return when {
                 isDownloaded -> getHostersOnDownloaded(episode, anime, source)
-                source is AnimeHttpSource -> getHostersOnHttp(episode, anime, source)
-                source is LocalSource -> getHostersOnLocal(episode)
+                source is AnimeHttpSource -> getHostersOnHttp(episode, source)
+                source is LocalAnimeSource -> getHostersOnLocal(episode)
                 else -> error("source not supported")
             }
         }
@@ -50,40 +52,52 @@ class EpisodeLoader {
          * @param episode the episode being parsed.
          * @param anime the anime of the episode.
          */
-        fun isDownload(episode: Episode, anime: Anime, skipCache: Boolean = true): Boolean {
+        fun isDownload(episode: Episode, anime: Anime): Boolean {
             val downloadManager: DownloadManager = Injekt.get()
             return downloadManager.isEpisodeDownloaded(
                 episode.name,
                 episode.scanlator,
                 anime.title,
                 anime.source,
-                skipCache = skipCache,
+                skipCache = true,
             )
+        }
+
+        private fun checkHasHosters(source: AnimeHttpSource): Boolean {
+            var current: Class<in AnimeHttpSource> = source.javaClass
+            while (true) {
+                if (current == ParsedAnimeHttpSource::class.java ||
+                    current == AnimeHttpSource::class.java ||
+                    current == AnimeSource::class.java
+                ) {
+                    return false
+                }
+                if (current.declaredMethods.any {
+                        it.name in
+                            listOf("getHosterList", "hosterListRequest", "hosterListParse")
+                    }
+                ) {
+                    return true
+                }
+                current = current.superclass ?: return false
+            }
         }
 
         /**
          * Returns a list of hosters when the [episode] is online.
          *
          * @param episode the episode being parsed.
-         * @param anime the anime of the episode.
          * @param source the online source of the episode.
          */
-        private suspend fun getHostersOnHttp(episode: Episode, anime: Anime, source: AnimeHttpSource): List<Hoster> {
-            val sourceClass = source.javaClass.name
-            val hasMethod = hasHosterListMethod.getOrPut(sourceClass) {
-                source.javaClass.declaredMethods.any { it.name == "getHosterList" }
-            }
-
-            return try {
-                kotlinx.coroutines.withTimeout(15000) {
-                    if (hasMethod) {
-                        source.getHosterList(anime.toSAnime(), episode.toSEpisode())
-                    } else {
-                        source.getVideoList(episode.toSEpisode()).toHosterList()
-                    }
-                }
-            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                throw java.io.IOException("Connection timed out while fetching hosters")
+        private suspend fun getHostersOnHttp(episode: Episode, source: AnimeHttpSource): List<Hoster> {
+            // TODO(1.6): Remove else block when dropping support for ext lib <1.6
+            return if (checkHasHosters(source)) {
+                source.getHosterList(episode.toSEpisode())
+                    .let { source.run { it.sortHosters() } }
+            } else {
+                source.getVideoList(episode.toSEpisode())
+                    .let { source.run { it.sortVideos() } }
+                    .toHosterList()
             }
         }
 
@@ -118,7 +132,7 @@ class EpisodeLoader {
         ): List<Hoster> {
             return try {
                 val (animeDirName, episodeName) = episode.url.split('/', limit = 2)
-                val fileSystem: LocalSourceFileSystem = Injekt.get()
+                val fileSystem: LocalAnimeSourceFileSystem = Injekt.get()
                 val videoFile = fileSystem.getBaseDirectory()
                     ?.findFile(animeDirName)
                     ?.findFile(episodeName)
@@ -143,11 +157,30 @@ class EpisodeLoader {
          * @param hoster the hoster.
          */
         private suspend fun getVideos(source: AnimeSource, hoster: Hoster): List<Video> {
-            return when {
+            val videos = when {
                 hoster.videoList != null && source is AnimeHttpSource -> hoster.videoList!!.parseVideoUrls(source)
                 hoster.videoList != null -> hoster.videoList!!
                 source is AnimeHttpSource -> getVideosOnHttp(source, hoster)
                 else -> error("source not supported")
+            }
+
+            val sortedVideos = if (source is AnimeHttpSource) {
+                source.run { videos.sortVideos() }
+            } else {
+                videos
+            }
+            
+            return sortedVideos.resolveSubtitles()
+        }
+
+        private suspend fun List<Video>.resolveSubtitles(): List<Video> {
+            return this.map { video ->
+                if (video.subtitleTracks.isEmpty()) return@map video
+
+                val resolvedTracks = video.subtitleTracks.flatMap { StremioSubtitleResolver.resolve(it) }
+                if (resolvedTracks == video.subtitleTracks) return@map video
+
+                video.copy(subtitleTracks = resolvedTracks)
             }
         }
 
@@ -158,27 +191,17 @@ class EpisodeLoader {
          * @param hoster the hoster.
          */
         private suspend fun getVideosOnHttp(source: AnimeHttpSource, hoster: Hoster): List<Video> {
-            return source.getVideoList(hoster).parseVideoUrls(source)
+            return source.getVideoList(hoster)
+                .parseVideoUrls(source)
         }
 
-        // Parallelized video URL parsing for faster startup
+        // TODO(1.6): Remove after ext lib bump
         private suspend fun List<Video>.parseVideoUrls(source: AnimeHttpSource): List<Video> {
-            return coroutineScope {
-                this@parseVideoUrls.map { video ->
-                    async {
-                        if (video.videoUrl != "null" && video.videoUrl.isNotBlank() && !video.videoUrl.contains("placeholder")) return@async video
+            return this.map { video ->
+                if (video.videoUrl != "null") return@map video
 
-                        try {
-                            // High-speed resolution: Increased timeout for individual quality links
-                            kotlinx.coroutines.withTimeout(15000) {
-                                val newVideoUrl = source.getVideoUrl(video)
-                                video.copy(videoUrl = newVideoUrl)
-                            }
-                        } catch (e: Exception) {
-                            video
-                        }
-                    }
-                }.awaitAll()
+                val newVideoUrl = source.getVideoUrl(video)
+                video.copy(videoUrl = newVideoUrl)
             }
         }
 

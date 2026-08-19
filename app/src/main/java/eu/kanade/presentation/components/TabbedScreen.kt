@@ -2,6 +2,7 @@ package eu.kanade.presentation.components
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,9 +28,14 @@ import dev.icerock.moko.resources.StringResource
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.getValue
+import eu.kanade.domain.ui.UiPreferences
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.TabText
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 @Composable
 fun TabbedScreen(
@@ -43,17 +49,20 @@ fun TabbedScreen(
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val hazeEnabled by uiPreferences.hazeEnabled().collectAsStatePref()
 
     Scaffold(
         topBar = {
-            if (titleRes != null) {
-                val tab = tabs.getOrNull(state.currentPage) ?: tabs.getOrNull(0)
+            val tab = tabs.getOrNull(state.currentPage) ?: tabs.getOrNull(0)
+            val currentTitleRes = titleRes ?: tab?.titleRes
+            if (currentTitleRes != null) {
                 val searchEnabled = tab?.searchEnabled ?: false
 
                 SearchToolbar(
                     titleContent = {
                         AppBarTitle(
-                            stringResource(titleRes),
+                            stringResource(currentTitleRes),
                             modifier = modifier,
                             null,
                             tab?.numberTitle ?: 0,
@@ -68,13 +77,13 @@ fun TabbedScreen(
             }
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        contentWindowInsets = WindowInsets(0),
+        hazeEnabled = hazeEnabled,
     ) { contentPadding ->
         Column(
-            modifier = Modifier.padding(
-                top = contentPadding.calculateTopPadding(),
-                start = contentPadding.calculateStartPadding(LocalLayoutDirection.current),
-                end = contentPadding.calculateEndPadding(LocalLayoutDirection.current),
-            ),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
         ) {
             FlexibleTabRow(
                 scrollable = scrollable,
@@ -101,7 +110,7 @@ fun TabbedScreen(
                 modifier = Modifier.fillMaxSize(),
                 state = state,
                 verticalAlignment = Alignment.Top,
-                beyondViewportPageCount = 2,
+                beyondViewportPageCount = 0,
             ) { page ->
                 tabs[page].content(
                     PaddingValues(bottom = contentPadding.calculateBottomPadding()),

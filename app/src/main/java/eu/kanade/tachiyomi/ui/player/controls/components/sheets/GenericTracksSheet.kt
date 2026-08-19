@@ -42,14 +42,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.player.components.PlayerSheet
 import eu.kanade.tachiyomi.ui.player.PlayerViewModel.VideoTrack
-import kotlinx.collections.immutable.ImmutableList
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun <T> GenericTracksSheet(
-    tracks: ImmutableList<T>,
+    tracks: List<T>,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     dismissEvent: Boolean = false,
@@ -57,18 +56,17 @@ fun <T> GenericTracksSheet(
     track: @Composable (T) -> Unit = {},
     footer: @Composable () -> Unit = {},
 ) {
-    val sheetId = remember { Any().hashCode() }
     PlayerSheet(onDismissRequest, dismissEvent = dismissEvent) {
         Column(modifier) {
             header()
             LazyColumn {
                 itemsIndexed(
                     items = tracks,
-                    key = { index, it -> "track-$sheetId-$index-${it.hashCode()}" }
+                    key = { index, _ -> "track-$index" }
                 ) { _, it ->
                     track(it)
                 }
-                item(key = "footer-$sheetId") {
+                item(key = "footer") {
                     footer()
                 }
             }
@@ -113,24 +111,33 @@ fun AddTrackRow(
 
 @Composable
 fun getTrackTitle(track: VideoTrack): String {
-    return when {
-        track.id == -1 -> {
-            track.name
+    return when (track) {
+        is VideoTrack.Internal -> {
+            when {
+                track.id == -1 -> track.name
+                track.language.isNullOrBlank() && track.name.isNotBlank() -> stringResource(MR.strings.player_sheets_track_title_wo_lang, track.id, track.name)
+                !track.language.isNullOrBlank() && track.name.isNotBlank() -> {
+                    if (track.name.contains(track.language, ignoreCase = true) || 
+                        track.language.contains(track.name, ignoreCase = true)) {
+                        stringResource(MR.strings.player_sheets_track_title_wo_lang, track.id, track.name)
+                    } else {
+                        stringResource(MR.strings.player_sheets_track_title_w_lang, track.id, track.name, track.language)
+                    }
+                }
+                !track.language.isNullOrBlank() && track.name.isBlank() -> stringResource(MR.strings.player_sheets_track_lang_wo_title, track.id, track.language)
+                else -> track.name
+            }
         }
-
-        track.language.isNullOrBlank() && track.name.isNotBlank() -> {
-            stringResource(MR.strings.player_sheets_track_title_wo_lang, track.id, track.name)
+        is VideoTrack.External -> {
+            val name = track.name
+            val lang = track.language
+            when {
+                lang.isNullOrBlank() -> name
+                name.isBlank() -> lang
+                name.contains(lang, ignoreCase = true) || lang.contains(name, ignoreCase = true) -> name
+                else -> "$name ($lang)"
+            }
         }
-
-        !track.language.isNullOrBlank() && track.name.isNotBlank() -> {
-            stringResource(MR.strings.player_sheets_track_title_w_lang, track.id, track.name, track.language)
-        }
-
-        !track.language.isNullOrBlank() && track.name.isBlank() -> {
-            stringResource(MR.strings.player_sheets_track_lang_wo_title, track.id, track.language)
-        }
-
-        else -> stringResource(MR.strings.player_sheets_track_title_wo_lang, track.id, track.name)
     }
 }
 

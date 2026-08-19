@@ -19,7 +19,7 @@ import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.episode.model.toEpisodeUpdate
 import tachiyomi.domain.episode.repository.EpisodeRepository
 import tachiyomi.domain.episode.service.EpisodeRecognition
-import tachiyomi.source.local.isLocal
+import tachiyomi.source.localanime.isLocal
 import java.lang.Long.max
 import java.time.ZonedDateTime
 import java.util.TreeSet
@@ -73,7 +73,7 @@ class SyncEpisodesWithSource(
             sourceEpisodes.any { sourceEpisode ->
                 dbEpisode.url == sourceEpisode.url
             }
-        }
+        }.toMutableList()
 
         // Used to not set upload date of older episodes
         // to a higher value than newer episodes
@@ -98,6 +98,14 @@ class SyncEpisodesWithSource(
             episode = episode.copy(episodeNumber = episodeNumber)
 
             val dbEpisode = dbEpisodes.find { it.url == episode.url }
+                ?: dbEpisodes.find {
+                    val incomingCleanName = with(EpisodeSanitizer) { episode.name.sanitize(anime.title) }
+                    val dbCleanName = with(EpisodeSanitizer) { it.name.sanitize(anime.title) }
+                    it.isRecognizedNumber &&
+                        it.episodeNumber == episode.episodeNumber &&
+                        it.scanlator == episode.scanlator &&
+                        incomingCleanName == dbCleanName
+                }
 
             if (dbEpisode == null) {
                 val toAddEpisode = if (episode.dateUpload == 0L) {
@@ -127,10 +135,13 @@ class SyncEpisodesWithSource(
                         downloadManager.renameEpisode(source, anime, dbEpisode, episode)
                     }
                     var toChangeEpisode = dbEpisode.copy(
+                        url = episode.url,
                         name = episode.name,
                         episodeNumber = episode.episodeNumber,
                         scanlator = episode.scanlator,
                         sourceOrder = episode.sourceOrder,
+                        summary = episode.summary,
+                        previewUrl = episode.previewUrl,
                     )
                     if (episode.dateUpload != 0L) {
                         toChangeEpisode = toChangeEpisode.copy(dateUpload = episode.dateUpload)

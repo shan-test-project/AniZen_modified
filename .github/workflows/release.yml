@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-release:
     name: Build & Public Release
@@ -50,7 +53,7 @@ jobs:
           git push origin master
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease -Pinclude-telemetry=false -Penable-updater=false --no-daemon
+        run: ./gradlew assembleRelease -Pinclude-telemetry=false -Penable-updater=true --no-daemon
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
@@ -64,19 +67,84 @@ jobs:
             mv "$f" "AniZen-v$VERSION-$f"
           done
 
-      - name: Generate Changelog
+      - name: Generate Detailed Context for AI
         run: |
           # Get the previous tag
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
-            # If no tags, get all commits
-            CHANGELOG=$(git log --pretty=format:"* %s (%h)")
+            RANGE="-n 10"
           else
-            # Get commits since last tag, excluding the automated version bump
-            CHANGELOG=$(git log $PREV_TAG..HEAD --pretty=format:"* %s (%h)" | grep -v "chore: bump version" || echo "No changes detected.")
+            RANGE="$PREV_TAG..HEAD"
           fi
+          
+          mkdir -p .github/ai
+          # 1. Get commits (subjects and bodies)
+          git log $RANGE --pretty=format:"- %s%n%b" | grep -v "chore: bump version" > .github/ai/commits.txt || echo "New version release." > .github/ai/commits.txt
+          
+          # 2. Get file change statistics
+          git diff --stat $RANGE > .github/ai/files.txt
+          
+          # 3. Get actual code diff (capped at 200 lines for stability)
+          git diff -U1 $RANGE | head -n 200 > .github/ai/diff.txt
+
+      - name: Format Changelog with Groq AI
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          COMMITS=$(cat .github/ai/commits.txt)
+          FILES=$(cat .github/ai/files.txt)
+          DIFF=$(cat .github/ai/diff.txt)
+          
+          cat > .github/ai/full_prompt.txt <<EOF
+          You are an excited team member of AniZen! Write a friendly and hyped 'Changelog' for our fans. 
+          Summarize WHAT IS NEW and WHAT CHANGED based on the commits and diff below.
+          Use emojis like 🚀, ✨, and 🛠️. Group into 'What's New', 'Fixed', and 'Polished'.
+          CRITICAL: Do NOT mention technical terms like 'code', 'commits', or 'diff'. Focus on improvements!
+          If the diff is truncated, rely on the commit history to tell the story.
+          
+          NEW CHANGES:
+          COMMITS:
+          $COMMITS
+
+          FILE STATS:
+          $FILES
+          
+          DIFF SNIPPET:
+          $DIFF
+          EOF
+          
+          PAYLOAD=$(jq -n \
+            --rawfile prompt .github/ai/full_prompt.txt \
+            --arg model "llama-3.3-70b-versatile" \
+            '{
+              model: $model,
+              messages: [{role: "user", content: $prompt}],
+              temperature: 0.7,
+              max_tokens: 1024
+            }')
+          
+          echo "Requesting AI summary from Groq (llama-3.3-70b-versatile)..."
+          RESPONSE=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" \
+            -H "Authorization: Bearer $GROQ_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          
+          # Debug: Log the response status/error (excluding full body if successful)
+          ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // empty')
+          if [ -n "$ERROR_MSG" ]; then
+            echo "Groq API Error: $ERROR_MSG"
+          else
+            echo "Groq API Request: Success"
+          fi
+          
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+          
+          if [ -z "$SUMMARY" ] || [ "$SUMMARY" == "null" ]; then
+            SUMMARY="We've made some secret improvements under the hood to make your experience better! ✨"
+          fi
+          
           echo "CHANGELOG<<EOF" >> $GITHUB_ENV
-          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
       - name: Create GitHub Release
@@ -91,8 +159,43 @@ jobs:
           body: |
             ## 🚀 AniZen v${{ env.NEW_VN }}
             
-            ### 📝 What's Changed
             ${{ env.CHANGELOG }}
             
             ---
             **📥 Download:** Choose the `arm64-v8a` version for your phone.
+
+      - name: Send Announcement to Discord
+        if: success()
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: |
+          # Define clean links for Markdown
+          RELEASE_URL="https://github.com/salmanbappi/AniZen/releases/tag/v${{ env.NEW_VN }}"
+          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+          
+          EMBED_TITLE="🚀 AniZen Official Release (v${{ env.NEW_VN }})"
+          EMBED_DESC=$(cat <<EOF
+          ${{ env.CHANGELOG }}
+
+          ---
+          **📥 [Download Release APK]($RELEASE_URL)**
+          **🔗 [View Release Details]($RELEASE_URL)**
+          EOF
+          )
+
+          # Encode using jq for a clean Discord Embed payload
+          PAYLOAD=$(jq -n \
+            --arg title "$EMBED_TITLE" \
+            --arg desc "$EMBED_DESC" \
+            '{
+              embeds: [{
+                title: $title,
+                description: $desc,
+                color: 16763904
+              }]
+            }')
+          
+          curl -X POST -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+               -H "Content-Type: application/json" \
+               -d "$PAYLOAD" \
+               https://discord.com/api/v10/channels/1482254131417845821/messages

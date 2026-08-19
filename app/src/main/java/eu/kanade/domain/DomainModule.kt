@@ -1,6 +1,7 @@
 package eu.kanade.domain
 
 import eu.kanade.domain.anime.interactor.SetAnimeViewerFlags
+import eu.kanade.domain.anime.interactor.SyncSeasonsWithSource
 import eu.kanade.domain.anime.interactor.UpdateAnime
 import eu.kanade.domain.download.interactor.DeleteDownload
 import eu.kanade.domain.episode.interactor.SetSeenStatus
@@ -33,6 +34,7 @@ import mihon.domain.extensionrepo.interactor.UpdateExtensionRepo
 import mihon.domain.extensionrepo.repository.ExtensionRepoRepository
 import mihon.domain.extensionrepo.service.ExtensionRepoService
 import mihon.domain.upcoming.interactor.GetUpcomingAnime
+import tachiyomi.data.anime.AnimeMergeRepositoryImpl
 import tachiyomi.data.anime.AnimeRepositoryImpl
 import tachiyomi.data.category.CategoryRepositoryImpl
 import tachiyomi.data.custombutton.CustomButtonRepositoryImpl
@@ -48,13 +50,19 @@ import tachiyomi.domain.anime.interactor.FetchInterval
 import tachiyomi.domain.anime.interactor.GetAnime
 import tachiyomi.domain.anime.interactor.GetAnimeByUrlAndSourceId
 import tachiyomi.domain.anime.interactor.GetAnimeWithEpisodes
+import tachiyomi.domain.anime.interactor.GetAnimeWithEpisodesAndSeasons
+import tachiyomi.domain.anime.interactor.GetCustomAnimeInfo
 import tachiyomi.domain.anime.interactor.GetDuplicateLibraryAnime
 import tachiyomi.domain.anime.interactor.GetFavorites
 import tachiyomi.domain.anime.interactor.GetLibraryAnime
 import tachiyomi.domain.anime.interactor.CalculateUserAffinity
+import tachiyomi.domain.anime.interactor.GetMergedReferencesById
+import tachiyomi.domain.anime.interactor.GetSeasonsByAnimeId
 import tachiyomi.domain.anime.interactor.NetworkToLocalAnime
 import tachiyomi.domain.anime.interactor.ResetViewerFlags
 import tachiyomi.domain.anime.interactor.SetAnimeEpisodeFlags
+import tachiyomi.domain.anime.interactor.SetAnimeSeasonFlags
+import tachiyomi.domain.anime.repository.AnimeMergeRepository
 import tachiyomi.domain.anime.repository.AnimeRepository
 import tachiyomi.domain.category.interactor.CreateCategoryWithName
 import tachiyomi.domain.category.interactor.DeleteCategory
@@ -75,10 +83,14 @@ import tachiyomi.domain.custombuttons.interactor.ReorderCustomButton
 import tachiyomi.domain.custombuttons.interactor.ToggleFavoriteCustomButton
 import tachiyomi.domain.custombuttons.interactor.UpdateCustomButton
 import tachiyomi.domain.custombuttons.repository.CustomButtonRepository
+import tachiyomi.domain.episode.interactor.GetAvailableScanlators
 import tachiyomi.domain.episode.interactor.GetEpisode
 import tachiyomi.domain.episode.interactor.GetEpisodeByUrlAndAnimeId
 import tachiyomi.domain.episode.interactor.GetEpisodesByAnimeId
+import tachiyomi.domain.episode.interactor.GetExcludedScanlators
+import tachiyomi.domain.episode.interactor.GetMergedEpisodesByAnimeId
 import tachiyomi.domain.episode.interactor.SetAnimeDefaultEpisodeFlags
+import tachiyomi.domain.episode.interactor.SetExcludedScanlators
 import tachiyomi.domain.episode.interactor.ShouldUpdateDbEpisode
 import tachiyomi.domain.episode.interactor.UpdateEpisode
 import tachiyomi.domain.episode.repository.EpisodeRepository
@@ -130,48 +142,59 @@ class DomainModule : InjektModule {
         // KMK <--
 
         addSingletonFactory<AnimeRepository> { AnimeRepositoryImpl(get()) }
+        addSingletonFactory<AnimeMergeRepository> { AnimeMergeRepositoryImpl(get()) }
         addFactory { GetDuplicateLibraryAnime(get()) }
         addFactory { GetFavorites(get()) }
         addFactory { GetLibraryAnime(get()) }
         addFactory { CalculateUserAffinity(get(), get(), get()) }
-        addFactory { GetAnimeWithEpisodes(get(), get()) }
+        addFactory { GetAnimeWithEpisodes(get(), get(), get()) }
+        addFactory { GetCustomAnimeInfo(get()) }
+        addFactory { GetSeasonsByAnimeId(get(), get()) }
+        addFactory { GetAnimeWithEpisodesAndSeasons(get(), get(), get(), get()) }
         addFactory { GetAnimeByUrlAndSourceId(get()) }
         addFactory { GetAnime(get()) }
         addFactory { GetNextEpisodes(get(), get(), get(), get()) }
         addFactory { GetUpcomingAnime(get()) }
         addFactory { ResetViewerFlags(get()) }
-        addFactory { SetAnimeEpisodeFlags(get()) }
+        addFactory { SetAnimeEpisodeFlags(get(), get()) }
+        addFactory { SetAnimeSeasonFlags(get()) }
         addFactory { FetchInterval(get()) }
         addFactory { SetAnimeDefaultEpisodeFlags(get(), get(), get()) }
         addFactory { SetAnimeViewerFlags(get()) }
         addFactory { NetworkToLocalAnime(get()) }
         addFactory { UpdateAnime(get(), get()) }
+        addFactory { SyncSeasonsWithSource(get(), get(), get(), get(), get()) }
         addFactory { SetAnimeCategories(get()) }
-        // addFactory { GetExcludedScanlators(get()) }
-        // addFactory { SetExcludedScanlators(get()) }
+        addFactory { GetMergedReferencesById(get()) }
+        addFactory { GetExcludedScanlators(get()) }
+        addFactory { SetExcludedScanlators(get()) }
 
         addSingletonFactory<ReleaseService> { ReleaseServiceImpl(get(), get()) }
         addFactory { GetApplicationRelease(get(), get()) }
 
         addSingletonFactory<TrackRepository> { TrackRepositoryImpl(get()) }
-        addFactory { TrackEpisode(get(), get(), get(), get(), get(), get(), get()) }
+        addFactory { TrackEpisode(get(), get(), get(), get(), get(), get()) }
         addFactory { AddTracks(get(), get(), get(), get()) }
         addFactory { RefreshTracks(get(), get(), get(), get()) }
         addFactory { DeleteTrack(get()) }
         addFactory { GetTracksPerAnime(get()) }
         addFactory { GetTracks(get()) }
         addFactory { InsertTrack(get()) }
-        addFactory { SyncEpisodeProgressWithTrack(get(), get(), get()) }
+        addFactory { SyncEpisodeProgressWithTrack(get(), get(), get(), get()) }
 
         addSingletonFactory<EpisodeRepository> { EpisodeRepositoryImpl(get()) }
         addFactory { GetEpisode(get()) }
         addFactory { GetEpisodesByAnimeId(get()) }
+        addFactory { GetMergedEpisodesByAnimeId(get(), get()) }
         addFactory { GetEpisodeByUrlAndAnimeId(get()) }
         addFactory { UpdateEpisode(get()) }
         addFactory { SetSeenStatus(get(), get(), get(), get(), get()) }
         addFactory { ShouldUpdateDbEpisode() }
+        addFactory { tachiyomi.domain.season.interactor.GetAnimeSeasonsById(get()) }
+        addFactory { tachiyomi.domain.season.interactor.ShouldUpdateDbSeason() }
+        addFactory { tachiyomi.domain.season.interactor.SetAnimeDefaultSeasonFlags(get(), get(), get()) }
         addFactory { SyncEpisodesWithSource(get(), get(), get(), get(), get(), get(), get()) }
-        // addFactory { GetAvailableScanlators(get()) }
+        addFactory { GetAvailableScanlators(get()) }
         addFactory { FilterEpisodesForDownload(get(), get(), get(), get()) }
 
         addSingletonFactory<HistoryRepository> { HistoryRepositoryImpl(get()) }

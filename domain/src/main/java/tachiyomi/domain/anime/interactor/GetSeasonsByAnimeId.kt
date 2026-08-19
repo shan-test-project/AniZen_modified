@@ -15,11 +15,16 @@ class GetSeasonsByAnimeId(
     private val animeMergeRepository: AnimeMergeRepository,
 ) {
 
-    suspend fun await(animeId: Long, virtualSeasons: List<Anime> = emptyList()): List<Season> {
+    suspend fun await(
+        animeId: Long, 
+        virtualSeasons: List<Anime> = emptyList(),
+        useHierarchicalSeasons: Boolean = true,
+    ): List<Season> {
         val anime = animeRepository.getAnimeById(animeId) ?: return emptyList()
         
         // 1. Get real hierarchical seasons from DB
-        val dbSeasons = animeRepository.getSeasonsByParentId(anime.parentId ?: anime.id)
+        val parentId = if (useHierarchicalSeasons) (anime.parentId ?: anime.id) else anime.id
+        val dbSeasons = animeRepository.getAnimeSeasonsById(parentId).map { it.anime }
         if (dbSeasons.isNotEmpty()) {
             return dbSeasons.map {
                 Season(
@@ -44,9 +49,9 @@ class GetSeasonsByAnimeId(
             }.sortedBy { it.seasonNumber }
         }
 
-        // 3. Use virtual seasons from auto-discovery as fallback
+        // 3. Fallback: Virtual Discovery Seasons
         if (virtualSeasons.isNotEmpty()) {
-            val all = (listOf(anime) + virtualSeasons).distinctBy { it.id }
+            val all = (listOf(anime) + virtualSeasons).distinctBy { it.url.trimEnd('/') }
             return all.map { 
                 Season(
                     anime = it,
@@ -60,22 +65,26 @@ class GetSeasonsByAnimeId(
         return listOf(Season(anime, SeasonRecognition.parseSeasonNumber(anime.title, anime.title), true))
     }
 
-    fun subscribe(animeId: Long, virtualSeasonsFlow: Flow<List<Anime>>? = null): Flow<List<Season>> = flow {
+    fun subscribe(
+        animeId: Long, 
+        virtualSeasonsFlow: Flow<List<Anime>>? = null,
+        useHierarchicalSeasons: Boolean = true,
+    ): Flow<List<Season>> = flow {
         val anime = animeRepository.getAnimeById(animeId) ?: return@flow
-        val parentId = anime.parentId ?: anime.id
+        val parentId = if (useHierarchicalSeasons) (anime.parentId ?: anime.id) else anime.id
         
         val animeFlow = animeRepository.getAnimeByIdAsFlow(animeId)
-        val dbSeasonsFlow = animeRepository.getSeasonsByParentIdAsFlow(parentId)
+        val dbSeasonsFlow = animeRepository.getAnimeSeasonsByIdAsFlow(parentId)
         val mergedAnimesFlow = animeMergeRepository.subscribeMergedAnimeById(animeId)
         val referencesFlow = animeMergeRepository.subscribeReferencesById(animeId)
 
         val flow = if (virtualSeasonsFlow != null) {
             combine(animeFlow, dbSeasonsFlow, mergedAnimesFlow, referencesFlow, virtualSeasonsFlow) { a, db, merged, refs, virtual ->
-                mapToSeasons(a, db, merged, refs, virtual)
+                mapToSeasons(a, db.map { it.anime }, merged, refs, virtual)
             }
         } else {
             combine(animeFlow, dbSeasonsFlow, mergedAnimesFlow, referencesFlow) { a, db, merged, refs ->
-                mapToSeasons(a, db, merged, refs, emptyList())
+                mapToSeasons(a, db.map { it.anime }, merged, refs, emptyList())
             }
         }
         emitAll(flow)
@@ -115,7 +124,7 @@ class GetSeasonsByAnimeId(
 
         // 3. Fallback: Virtual Discovery Seasons
         if (virtualSeasons.isNotEmpty()) {
-            val all = (listOf(anime) + virtualSeasons).distinctBy { it.id }
+            val all = (listOf(anime) + virtualSeasons).distinctBy { it.url.trimEnd('/') }
             return all.map {
                 Season(
                     it,

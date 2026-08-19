@@ -30,12 +30,14 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
@@ -48,9 +50,13 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.HourglassDisabled
+import eu.kanade.tachiyomi.source.getNameForAnimeInfo
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -76,6 +82,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
@@ -122,6 +129,9 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.math.roundToInt
 
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+
 @Composable
 fun AnimeInfoBox(
     isTabletUi: Boolean,
@@ -133,6 +143,8 @@ fun AnimeInfoBox(
     onCoverClick: () -> Unit,
     doSearch: (query: String, global: Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    mergedSources: ImmutableList<eu.kanade.tachiyomi.source.Source> = persistentListOf(),
+    isRefreshing: Boolean = false,
 ) {
     Box(
         modifier = modifier
@@ -140,27 +152,40 @@ fun AnimeInfoBox(
             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.05f)),
     ) {
         // Backdrop
-        val backdropGradientColors = listOf(
-            Color.Transparent,
-            MaterialTheme.colorScheme.background,
-        )
+        val backgroundColor = MaterialTheme.colorScheme.background
+        val backdropGradientColors = remember(backgroundColor) {
+            listOf(
+                Color.Transparent,
+                backgroundColor,
+            )
+        }
+        val backdropBrush = remember(backdropGradientColors) {
+            Brush.verticalGradient(colors = backdropGradientColors)
+        }
+        val context = LocalContext.current
+        val uiPreferences = remember { Injekt.get<eu.kanade.domain.ui.UiPreferences>() }
+        val animatedTransitions by uiPreferences.animatedTransitions().collectAsState()
+        val backdropImageRequest = remember(anime.id, anime.thumbnailUrl, anime.coverLastModified, animatedTransitions) {
+            ImageRequest.Builder(context)
+                .data(anime.asAnimeCover())
+                .crossfade(animatedTransitions)
+                .build()
+        }
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(anime)
-                .crossfade(true)
-                .build(),
+            model = backdropImageRequest,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .matchParentSize()
+                .clipToBounds()
                 .drawWithContent {
                     drawContent()
-                    drawRect(
-                        brush = Brush.verticalGradient(colors = backdropGradientColors),
-                    )
+                    drawRect(brush = backdropBrush)
                 }
                 .blur(4.dp)
-                .alpha(0.25f),
+                .graphicsLayer {
+                    alpha = 0.25f
+                },
         )
 
         // Anime & source info
@@ -174,6 +199,8 @@ fun AnimeInfoBox(
                     isStubSource = isStubSource,
                     onCoverClick = onCoverClick,
                     doSearch = doSearch,
+                    mergedSources = mergedSources,
+                    isRefreshing = isRefreshing,
                 )
             } else {
                 AnimeAndSourceTitlesLarge(
@@ -184,6 +211,8 @@ fun AnimeInfoBox(
                     isStubSource = isStubSource,
                     onCoverClick = onCoverClick,
                     doSearch = doSearch,
+                    mergedSources = mergedSources,
+                    isRefreshing = isRefreshing,
                 )
             }
         }
@@ -196,26 +225,33 @@ fun AnimeActionRow(
     trackingCount: Int,
     nextUpdate: Instant?,
     isUserIntervalMode: Boolean,
+    fetchInterval: Int,
+    status: Long,
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
     onTrackingClicked: () -> Unit,
     onEditIntervalClicked: (() -> Unit)?,
+    onEditNotesClicked: () -> Unit,
     onEditCategory: (() -> Unit)?,
     onContinueWatching: () -> Unit,
     isWatching: Boolean,
-    localScore: Double? = null,
-    onLocalScoreClicked: (() -> Unit)? = null,
     mainTrackItem: eu.kanade.tachiyomi.ui.anime.track.TrackItem? = null,
     modifier: Modifier = Modifier,
 ) {
     val defaultActionButtonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
 
-    val uiPreferences: eu.kanade.domain.ui.UiPreferences = Injekt.get()
-    val topPadding by uiPreferences.animeItemSpacing().collectAsState()
+    val nextUpdateDays = remember(nextUpdate) {
+        return@remember if (nextUpdate != null) {
+            val now = Instant.now()
+            now.until(nextUpdate, ChronoUnit.DAYS).toInt().coerceAtLeast(0)
+        } else {
+            null
+        }
+    }
 
     Column(
-        modifier = modifier.padding(start = 16.dp, top = topPadding.dp, end = 16.dp, bottom = 4.dp),
+        modifier = modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Surface(
@@ -232,6 +268,30 @@ fun AnimeActionRow(
                     color = if (favorite) MaterialTheme.colorScheme.primary else defaultActionButtonColor,
                     onClick = onAddToLibraryClicked,
                     onLongClick = onEditCategory,
+                )
+                AnimeActionButton(
+                    title = if (status == SAnime.COMPLETED.toLong()) {
+                        stringResource(MR.strings.not_applicable)
+                    } else if (fetchInterval == tachiyomi.domain.anime.interactor.FetchInterval.MANUAL_DISABLE) {
+                        stringResource(MR.strings.disabled)
+                    } else {
+                        when (nextUpdateDays) {
+                            null -> stringResource(MR.strings.not_applicable)
+                            0 -> stringResource(MR.strings.manga_interval_expected_update_soon)
+                            else -> pluralStringResource(
+                                MR.plurals.day,
+                                count = nextUpdateDays,
+                                nextUpdateDays
+                            )
+                        }
+                    },
+                    icon = if (fetchInterval == tachiyomi.domain.anime.interactor.FetchInterval.MANUAL_DISABLE) {
+                        Icons.Outlined.HourglassDisabled
+                    } else {
+                        Icons.Default.HourglassEmpty
+                    },
+                    color = if (isUserIntervalMode) MaterialTheme.colorScheme.primary else defaultActionButtonColor,
+                    onClick = { if (favorite) onEditIntervalClicked?.invoke() },
                 )
                 AnimeActionButton(
                     title = run {
@@ -271,25 +331,43 @@ fun AnimeActionRow(
 fun ExpandableAnimeDescription(
     defaultExpandState: Boolean,
     description: String?,
+    note: String?,
     tagsProvider: () -> List<String>?,
     onTagSearch: (String) -> Unit,
     onCopyTagToClipboard: (tag: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val (expanded, onExpanded) = rememberSaveable {
+        mutableStateOf(defaultExpandState)
+    }
     Column(modifier = modifier) {
-        val (expanded, onExpanded) = rememberSaveable {
-            mutableStateOf(defaultExpandState)
-        }
         val desc =
             description.takeIf { !it.isNullOrBlank() } ?: stringResource(MR.strings.description_placeholder)
+
+        if (!note.isNullOrBlank()) {
+            MarkdownRender(
+                content = note,
+                modifier = Modifier
+                    .secondaryItemAlpha()
+                    .padding(top = 8.dp)
+                    .padding(horizontal = 16.dp),
+                annotator = descriptionAnnotator,
+            )
+            HorizontalDivider(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .alpha(0.3f),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         AnimeSummary(
             description = desc,
             expanded = expanded,
+            onExpand = { onExpanded(!expanded) },
             modifier = Modifier
-                .padding(top = 8.dp)
-                .padding(horizontal = 16.dp)
-                .clickableNoIndication { onExpanded(!expanded) },
+                .padding(horizontal = 16.dp),
         )
         val tags = tagsProvider()
         if (!tags.isNullOrEmpty()) {
@@ -343,14 +421,14 @@ fun ExpandableAnimeDescription(
                         horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
                     ) {
                         items(
-                            items = tags.distinct(),
-                            key = { "tag-" + it },
-                        ) {
+                            items = tags,
+                            key = { tag -> "tag-$tag" },
+                        ) { tag ->
                             TagsChip(
                                 modifier = DefaultTagChipModifier,
-                                text = it,
+                                text = tag,
                                 onClick = {
-                                    tagSelected = it
+                                    tagSelected = tag
                                     showMenu = true
                                 },
                             )
@@ -371,6 +449,8 @@ private fun AnimeAndSourceTitlesLarge(
     isStubSource: Boolean,
     onCoverClick: () -> Unit,
     doSearch: (query: String, global: Boolean) -> Unit,
+    mergedSources: ImmutableList<eu.kanade.tachiyomi.source.Source>,
+    isRefreshing: Boolean,
 ) {
     Row(
         modifier = Modifier
@@ -386,6 +466,7 @@ private fun AnimeAndSourceTitlesLarge(
             contentDescription = stringResource(MR.strings.manga_cover),
             onClick = onCoverClick,
             ratio = ratio,
+            shouldExtractColor = true,
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -401,6 +482,8 @@ private fun AnimeAndSourceTitlesLarge(
                 isStubSource = isStubSource,
                 doSearch = doSearch,
                 textAlign = TextAlign.Start,
+                mergedSources = mergedSources,
+                isRefreshing = isRefreshing,
             )
         }
     }
@@ -415,6 +498,8 @@ private fun AnimeAndSourceTitlesSmall(
     isStubSource: Boolean,
     onCoverClick: () -> Unit,
     doSearch: (query: String, global: Boolean) -> Unit,
+    mergedSources: ImmutableList<eu.kanade.tachiyomi.source.Source>,
+    isRefreshing: Boolean,
 ) {
     Row(
         modifier = Modifier
@@ -430,6 +515,7 @@ private fun AnimeAndSourceTitlesSmall(
             contentDescription = stringResource(MR.strings.manga_cover),
             onClick = onCoverClick,
             ratio = ratio,
+            shouldExtractColor = true,
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -445,6 +531,8 @@ private fun AnimeAndSourceTitlesSmall(
                 isStubSource = isStubSource,
                 doSearch = doSearch,
                 textAlign = TextAlign.Start,
+                mergedSources = mergedSources,
+                isRefreshing = isRefreshing,
             )
         }
     }
@@ -461,13 +549,13 @@ private fun AnimeContentInfo(
     isStubSource: Boolean,
     doSearch: (query: String, global: Boolean) -> Unit,
     textAlign: TextAlign? = LocalTextStyle.current.textAlign,
+    mergedSources: ImmutableList<eu.kanade.tachiyomi.source.Source>,
+    isRefreshing: Boolean,
 ) {
     val context = LocalContext.current
     Text(
         text = title.ifBlank { stringResource(MR.strings.unknown_title) },
         style = MaterialTheme.typography.titleLarge,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
         modifier = Modifier.clickableNoIndication(
             onLongClick = {
                 if (title.isNotBlank()) {
@@ -494,7 +582,7 @@ private fun AnimeContentInfo(
         )
         Text(
             text = author?.takeIf { it.isNotBlank() }
-                ?: stringResource(MR.strings.unknown_author),
+                ?: if (isRefreshing) "" else stringResource(MR.strings.unknown_author),
             style = MaterialTheme.typography.titleSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -595,6 +683,21 @@ private fun AnimeContentInfo(
             iconTint = if (isStubSource) MaterialTheme.colorScheme.error else if (isRevealed) MaterialTheme.colorScheme.primary else null,
             onClick = { isRevealed = !isRevealed }
         )
+
+        MergedSourcesInfo(mergedSources)
+    }
+}
+
+@Composable
+private fun MergedSourcesInfo(
+    mergedSources: ImmutableList<eu.kanade.tachiyomi.source.Source>,
+) {
+    mergedSources.forEach { source ->
+        Spacer(modifier = Modifier.width(4.dp))
+        InfoChip(
+            icon = Icons.Outlined.Language,
+            text = source.getNameForAnimeInfo(),
+        )
     }
 }
 
@@ -661,6 +764,7 @@ private val descriptionAnnotator = markdownAnnotator(
 private fun AnimeSummary(
     description: String,
     expanded: Boolean,
+    onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
@@ -668,7 +772,8 @@ private fun AnimeSummary(
         modifier = modifier
             .fillMaxWidth()
             .animateContentSize()
-            .clipToBounds(),
+            .clipToBounds()
+            .clickableNoIndication(onClick = onExpand),
     ) {
         SelectionContainer {
             Box(

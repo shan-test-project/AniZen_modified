@@ -28,7 +28,7 @@ import tachiyomi.domain.library.service.LibraryPreferences.Companion.ANIME_NON_C
 import tachiyomi.domain.library.service.LibraryPreferences.Companion.ANIME_NON_SEEN
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.domain.track.model.Track
-import tachiyomi.source.local.isLocal
+import tachiyomi.source.localanime.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -165,8 +165,8 @@ class StatsScreenModel(
             )
 
             // Cleanup old logs (older than 30 days) to prevent database bloat
-            val thirtyDaysAgo = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -30) }.time
-            getActivityLog.awaitRemoveOldActivity(thirtyDaysAgo)
+            val thirtyDaysAgoDate = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -30) }.time
+            getActivityLog.awaitRemoveOldActivity(thirtyDaysAgoDate)
 
             // Status Breakdown
             val statusBreakdown = run {
@@ -229,18 +229,13 @@ class StatsScreenModel(
             }
 
             // Reactive Feed Statistics
-            uiPreferences.enableFeed().changes()
-                .flatMapLatest { enabled ->
-                    if (!enabled) return@flatMapLatest flowOf(null)
-                    
-                    val thirtyDaysAgo = Calendar.getInstance().apply {
-                        add(Calendar.DAY_OF_YEAR, -30)
-                    }.time
-                    
-                    getActivityLog.subscribeByPeriod(thirtyDaysAgo)
-                        .combine(Injekt.get<tachiyomi.domain.source.interactor.GetFeedSavedSearchGlobal>().subscribe()) { logs, feeds ->
-                            calculateFeedActivity(logs, feeds)
-                        }
+            val thirtyDaysAgoFeedDate = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, -30)
+            }.time
+            
+            getActivityLog.subscribeByPeriod(thirtyDaysAgoFeedDate)
+                .combine(Injekt.get<tachiyomi.domain.source.interactor.GetFeedSavedSearchGlobal>().subscribe()) { logs, feeds ->
+                    calculateFeedActivity(logs, feeds)
                 }
                 .onEach { feedActivity ->
                     mutableState.update { state ->
@@ -402,11 +397,7 @@ class StatsScreenModel(
 
         val latencyMatrix = topSources.map { sourceId ->
             val name = sourceManager.getOrStub(sourceId).name
-            val latency = if (name.lowercase().contains("dflix") || name.lowercase().contains("dhaka")) {
-                (20..80).random()
-            } else {
-                (200..600).random()
-            }
+            val latency = (50..350).random()
             name to latency
         }
 
@@ -418,38 +409,32 @@ class StatsScreenModel(
 
         val reliability = topSources.map { sourceId ->
             val name = sourceManager.getOrStub(sourceId).name
-            val rate = if (name.lowercase().contains("ftp")) 0.99 else (85..98).random().toDouble() / 100.0
+            val rate = (85..99).random().toDouble() / 100.0
             name to rate
         }
 
-        val topologyBreakdown = mutableMapOf("BDIX" to 0, "Global CDN" to 0, "Peering" to 0)
+        val topologyBreakdown = mutableMapOf("Global CDN" to 0, "Peering" to 0)
         topSources.forEach { sourceId ->
             val name = sourceManager.getOrStub(sourceId).name.lowercase()
-            val isBdix = name.contains("dflix") || name.contains("dhaka") || name.contains("bdix") || 
-                         name.contains("ftp") || name.contains("sam") || name.contains("bijoy") ||
-                         name.contains("icc") || name.contains("fanush") || name.contains("nagordola")
-
             when {
-                isBdix -> {
-                    topologyBreakdown["BDIX"] = topologyBreakdown["BDIX"]!! + 1
-                }
                 name.contains("manga") || name.contains("anime") -> {
                     topologyBreakdown["Global CDN"] = topologyBreakdown["Global CDN"]!! + 1
                 }
-                else -> topologyBreakdown["Peering"] = topologyBreakdown["Peering"]!! + 1
+                else -> {
+                    topologyBreakdown["Peering"] = topologyBreakdown["Peering"]!! + 1
+                }
             }
         }
 
         val healthReport = topSources.map { sourceId ->
             val source = sourceManager.getOrStub(sourceId)
             val name = source.name
-            val isBdix = name.lowercase().contains("dflix") || name.lowercase().contains("dhaka") || name.lowercase().contains("bdix") || name.lowercase().contains("ftp")
             
             ExtensionHealth(
                 name = name,
                 isOnline = true,
-                latency = if (isBdix) (20..80).random() else (200..600).random(),
-                type = if (isBdix) "BDIX" else "Global",
+                latency = (50..350).random(),
+                type = "Global",
                 issue = null
             )
         }
@@ -485,32 +470,44 @@ class StatsScreenModel(
         val now = System.currentTimeMillis()
         val monthMillis = 30 * 24 * 60 * 60 * 1000L
 
-        val recentHistory = history.filter { (it.seenAt?.time ?: 0) > (now - monthMillis) }
+        val recentHistory = history.filter { it.seenAt != null && it.seenAt!!.time > (now - monthMillis) }
         val sessionsByWeek = recentHistory.groupBy {
             val cal = Calendar.getInstance().apply { time = it.seenAt!! }
             cal.get(Calendar.WEEK_OF_YEAR)
         }.size
         
-        val avgSessions = if (sessionsByWeek > 0) recentHistory.size.toDouble() / 4.0 else 0.0
+        val divisorWeeks = if (history.isNotEmpty()) {
+            val earliestSeen = history.mapNotNull { it.seenAt?.time }.minOrNull() ?: now
+            val totalSpanDays = ((now - earliestSeen) / (24 * 60 * 60 * 1000L)).coerceAtLeast(1)
+            val activeDays = totalSpanDays.coerceAtMost(30).coerceAtLeast(7)
+            activeDays.toDouble() / 7.0
+        } else {
+            4.28
+        }
+        val avgSessions = if (sessionsByWeek > 0) recentHistory.size.toDouble() / divisorWeeks else 0.0
 
-        val topDay = history.filter { (it.seenAt?.time ?: 0) > (now - (24 * 60 * 60 * 1000L)) }
+        val topDay = history.filter { it.seenAt != null && it.seenAt!!.time > (now - (24 * 60 * 60 * 1000L)) }
             .groupingBy { it.animeId }.eachCount().maxByOrNull { it.value }
-            ?.let { entry -> animeList.find { it.id == entry.key }?.anime?.title }
+            ?.let { entry -> history.find { it.animeId == entry.key }?.title }
 
-        val topMonth = history.filter { (it.seenAt?.time ?: 0) > (now - monthMillis) }
+        val topMonth = history.filter { it.seenAt != null && it.seenAt!!.time > (now - monthMillis) }
             .groupingBy { it.animeId }.eachCount().maxByOrNull { it.value }
-            ?.let { entry -> animeList.find { it.id == entry.key }?.anime?.title }
+            ?.let { entry -> history.find { it.animeId == entry.key }?.title }
 
         val hourCounts = history.mapNotNull { it.seenAt }.map {
             Calendar.getInstance().apply { time = it }.get(Calendar.HOUR_OF_DAY)
         }.groupingBy { it }.eachCount()
         
-        val topHour = hourCounts.maxByOrNull { it.value }?.key ?: 0
-        val preferredTime = when (topHour) {
-            in 5..11 -> "Morning"
-            in 12..17 -> "Afternoon"
-            in 18..22 -> "Evening"
-            else -> "Late Night"
+        val preferredTime = if (hourCounts.isEmpty()) {
+            "N/A"
+        } else {
+            val topHour = hourCounts.maxByOrNull { it.value }?.key ?: 0
+            when (topHour) {
+                in 5..11 -> "Morning"
+                in 12..17 -> "Afternoon"
+                in 18..22 -> "Evening"
+                else -> "Late Night"
+            }
         }
 
         return StatsData.WatchHabits(topDay, topMonth, preferredTime, avgSessions)
@@ -571,7 +568,7 @@ class StatsScreenModel(
             emptyList()
         }
 
-        val updateRestrictions = preferences.autoUpdateAnimeRestrictions().get()
+        val updateRestrictions = preferences.autoUpdateAnimeRestrictions.get()
         return includedAnime
             .fastFilterNot { it.anime.id in excludedMangaIds }
             .fastDistinctBy { it.anime.id }

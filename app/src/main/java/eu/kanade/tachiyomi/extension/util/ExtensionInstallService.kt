@@ -3,7 +3,9 @@ package eu.kanade.tachiyomi.extension.util
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.os.IBinder
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.tachiyomi.R
@@ -25,14 +27,22 @@ class ExtensionInstallService : Service() {
 
     override fun onCreate() {
         val notification = notificationBuilder(Notifications.CHANNEL_EXTENSIONS_UPDATE) {
-            setSmallIcon(R.mipmap.ic_launcher)
+            setSmallIcon(R.drawable.ic_splash_logo)
             setAutoCancel(false)
             setOngoing(true)
             setShowWhen(false)
             setContentTitle(stringResource(MR.strings.ext_install_service_notif))
             setProgress(100, 100, true)
         }.build()
-        startForeground(Notifications.ID_EXTENSION_INSTALLER, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                Notifications.ID_EXTENSION_INSTALLER,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE,
+            )
+        } else {
+            startForeground(Notifications.ID_EXTENSION_INSTALLER, notification)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

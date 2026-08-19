@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.sync.service.GoogleDriveService
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
+import eu.kanade.tachiyomi.extension.util.ExtensionInstaller
 import eu.kanade.tachiyomi.network.JavaScriptEngine
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.AndroidSourceManager
@@ -39,13 +40,16 @@ import tachiyomi.data.Animes
 import tachiyomi.data.Database
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.DateColumnAdapter
+import tachiyomi.data.FetchTypeColumnAdapter
 import tachiyomi.data.History
 import tachiyomi.data.StringListColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
 import tachiyomi.domain.source.service.SourceManager
+
 import tachiyomi.domain.storage.service.StorageManager
-import tachiyomi.source.local.image.LocalCoverManager
-import tachiyomi.source.local.io.LocalSourceFileSystem
+import tachiyomi.source.localanime.image.LocalAnimeSourceCoverManager
+import tachiyomi.source.localanime.image.LocalAnimeSourceEpisodeThumbnailManager
+import tachiyomi.source.localanime.io.LocalAnimeSourceFileSystem
 import uy.kohesive.injekt.api.InjektModule
 import uy.kohesive.injekt.api.InjektRegistrar
 import uy.kohesive.injekt.api.addSingleton
@@ -92,12 +96,14 @@ class AppModule(val app: Application) : InjektModule {
                 animesAdapter = Animes.Adapter(
                     genreAdapter = StringListColumnAdapter,
                     update_strategyAdapter = UpdateStrategyColumnAdapter,
+                    fetch_typeAdapter = FetchTypeColumnAdapter,
                 ),
                 activity_logAdapter = Activity_log.Adapter(
                     timestampAdapter = DateColumnAdapter,
                 ),
             )
         }
+
 
         addSingletonFactory<DatabaseHandler> {
             AndroidDatabaseHandler(
@@ -137,6 +143,7 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory<SourceManager> { AndroidSourceManager(app, get(), get()) }
 
         addSingletonFactory { ExtensionManager(app, get(), get(), get()) }
+        addSingletonFactory { ExtensionInstaller(app) }
 
         addSingletonFactory { DownloadProvider(app) }
         addSingletonFactory { DownloadManager(app) }
@@ -149,8 +156,9 @@ class AppModule(val app: Application) : InjektModule {
 
         addSingletonFactory { AndroidStorageFolderProvider(app) }
 
-        addSingletonFactory { LocalSourceFileSystem(get()) }
-        addSingletonFactory { LocalCoverManager(app, get()) }
+        addSingletonFactory { LocalAnimeSourceFileSystem(get()) }
+        addSingletonFactory { LocalAnimeSourceCoverManager(app, get()) }
+        addSingletonFactory { LocalAnimeSourceEpisodeThumbnailManager(app, get()) }
 
         addSingletonFactory { StorageManager(app, get()) }
 

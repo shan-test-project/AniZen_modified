@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.material.padding
@@ -118,17 +119,26 @@ private fun <T> WheelPicker(
     val lazyListState = rememberLazyListState(startIndex)
 
     var internalIndex by remember { mutableIntStateOf(startIndex) }
+    var isInitialComposition by remember { mutableStateOf(true) }
+
     val internalOnSelectionChanged: (Int) -> Unit = {
         internalIndex = it
         onSelectionChanged(it)
     }
 
     LaunchedEffect(lazyListState, onSelectionChanged) {
-        snapshotFlow { lazyListState.firstVisibleItemIndex to lazyListState.firstVisibleItemScrollOffset }
+        snapshotFlow {
+            lazyListState.layoutInfo.viewportSize.height to
+                lazyListState.firstVisibleItemScrollOffset
+        }
+            .filter { it.first > 0 }
             .map { calculateSnappedItemIndex(lazyListState) }
             .distinctUntilChanged()
             .collectLatest {
-                internalOnSelectionChanged(it)
+                if (!isInitialComposition) {
+                    internalOnSelectionChanged(it)
+                }
+                isInitialComposition = false
             }
     }
 
@@ -222,7 +232,7 @@ private fun <T> WheelPicker(
 }
 
 private fun LazyListState.snapOffsetForItem(itemInfo: LazyListItemInfo): Int {
-    val startScrollOffset = layoutInfo.beforeContentPadding
+    val startScrollOffset = 0
     val endScrollOffset = layoutInfo.let { it.viewportEndOffset - it.afterContentPadding }
     return startScrollOffset + (endScrollOffset - startScrollOffset - itemInfo.size) / 2
 }
@@ -239,8 +249,9 @@ private fun calculateAnimatedAlpha(
     lazyListState: LazyListState,
     index: Int,
 ): Float {
-    val distanceToIndexSnap = lazyListState.distanceToSnapForIndex(index).absoluteValue
     val viewPortHeight = lazyListState.layoutInfo.viewportSize.height.toFloat()
+    if (viewPortHeight <= 0f) return 0f
+    val distanceToIndexSnap = lazyListState.distanceToSnapForIndex(index).absoluteValue
     val singleViewPortHeight = viewPortHeight / ROW_COUNT
     return if (distanceToIndexSnap in 0..singleViewPortHeight.toInt()) {
         1.2f - (distanceToIndexSnap / singleViewPortHeight)

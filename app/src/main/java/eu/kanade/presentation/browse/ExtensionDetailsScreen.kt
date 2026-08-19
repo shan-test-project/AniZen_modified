@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Launch
 import androidx.compose.material.icons.outlined.Settings
@@ -75,13 +76,21 @@ fun ExtensionDetailsScreen(
 ) {
     val uriHandler = LocalUriHandler.current
     val url = remember(state.extension) {
-        val regex = """https://raw.githubusercontent.com/(.+?)/(.+?)/.+""".toRegex()
-        regex.find(state.extension?.repoUrl.orEmpty())
-            ?.let {
-                val (user, repo) = it.destructured
-                "https://github.com/$user/$repo"
-            }
-            ?: state.extension?.repoUrl
+        val githubRegex = """https://raw\.githubusercontent\.com/(.+?)/(.+?)/.+""".toRegex()
+        val codebergRegex = """https://codeberg\.org/(.+?)/(.+?)/raw/.+""".toRegex()
+        val gitlabRegex = """https://gitlab\.com/(.+?)/(.+?)/-/raw/.+""".toRegex()
+
+        val repoUrl = state.extension?.repoUrl.orEmpty()
+        githubRegex.find(repoUrl)?.let {
+            val (user, repo) = it.destructured
+            "https://github.com/$user/$repo"
+        } ?: codebergRegex.find(repoUrl)?.let {
+            val (user, repo) = it.destructured
+            "https://codeberg.org/$user/$repo"
+        } ?: gitlabRegex.find(repoUrl)?.let {
+            val (user, repo) = it.destructured
+            "https://gitlab.com/$user/$repo"
+        } ?: state.extension?.repoUrl
     }
 
     Scaffold(
@@ -185,10 +194,10 @@ private fun ExtensionDetails(
             )
         }
 
-        items(
+        itemsIndexed(
             items = sources,
-            key = { "source-${it.source.id}" },
-        ) { source ->
+            key = { index, it -> "source-${it.source.id}-$index" },
+        ) { _, source ->
             SourceSwitchPreference(
                 modifier = Modifier.animateItem(),
                 source = source,

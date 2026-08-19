@@ -22,9 +22,14 @@ import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.Source
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.domain.library.model.LibraryDisplayMode
+import eu.kanade.domain.ui.model.PanoramaMode
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
-import tachiyomi.source.local.LocalSource
+import eu.kanade.domain.ui.UiPreferences
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import tachiyomi.source.localanime.LocalAnimeSource
 
 @Composable
 fun BrowseSourceToolbar(
@@ -43,10 +48,13 @@ fun BrowseSourceToolbar(
     onSelectAll: () -> Unit = {},
     onInvertSelection: () -> Unit = {},
     selectedCount: Int = 0,
+    subtitle: String? = null,
+    searchEnabled: Boolean = true,
+    showMore: Boolean = true,
 ) {
     // Avoid capturing unstable source in actions lambda
     val title = source?.name
-    val isLocalSource = source is LocalSource
+    val isLocalSource = source is LocalAnimeSource
     val isConfigurableSource = source is ConfigurableSource
 
     val mode = displayMode ?: LibraryDisplayMode.default
@@ -59,13 +67,14 @@ fun BrowseSourceToolbar(
             if (selectedCount > 0) {
                 Text(text = selectedCount.toString())
             } else {
-                AppBarTitle(title)
+                AppBarTitle(title, subtitle = subtitle)
             }
         },
         searchQuery = searchQuery,
         onChangeSearchQuery = onSearchQueryChange,
         onSearch = onSearch,
         onClickCloseSearch = navigateUp,
+        searchEnabled = searchEnabled,
         actions = {
             if (selectedCount > 0) {
                 AppBarActions(
@@ -97,28 +106,30 @@ fun BrowseSourceToolbar(
                                     onClick = { selectingDisplayMode = true },
                                 ),
                             )
-                            if (isLocalSource) {
-                                add(
-                                    AppBar.OverflowAction(
-                                        title = stringResource(MR.strings.label_help),
-                                        onClick = onHelpClick,
-                                    ),
-                                )
-                            } else {
-                                add(
-                                    AppBar.OverflowAction(
-                                        title = stringResource(MR.strings.action_open_in_web_view),
-                                        onClick = onWebViewClick,
-                                    ),
-                                )
-                            }
-                            if (isConfigurableSource) {
-                                add(
-                                    AppBar.OverflowAction(
-                                        title = stringResource(MR.strings.action_settings),
-                                        onClick = onSettingsClick,
-                                    ),
-                                )
+                            if (showMore) {
+                                if (isLocalSource) {
+                                    add(
+                                        AppBar.OverflowAction(
+                                            title = stringResource(MR.strings.label_help),
+                                            onClick = onHelpClick,
+                                        ),
+                                    )
+                                } else {
+                                    add(
+                                        AppBar.OverflowAction(
+                                            title = stringResource(MR.strings.action_open_in_web_view),
+                                            onClick = onWebViewClick,
+                                        ),
+                                    )
+                                }
+                                if (isConfigurableSource) {
+                                    add(
+                                        AppBar.OverflowAction(
+                                            title = stringResource(MR.strings.action_settings),
+                                            onClick = onSettingsClick,
+                                        ),
+                                    )
+                                }
                             }
                         }
                         .build(),
@@ -129,6 +140,9 @@ fun BrowseSourceToolbar(
                 expanded = selectingDisplayMode,
                 onDismissRequest = { selectingDisplayMode = false },
             ) {
+                val uiPreferences = remember { Injekt.get<UiPreferences>() }
+                val panoramaMode by uiPreferences.browsePanoramaMode().collectAsStatePref()
+
                 RadioMenuItem(
                     text = { Text(text = stringResource(MR.strings.action_display_comfortable_grid)) },
                     isChecked = mode == LibraryDisplayMode.ComfortableGrid,
@@ -149,6 +163,20 @@ fun BrowseSourceToolbar(
                 ) {
                     selectingDisplayMode = false
                     onDisplayModeChange(LibraryDisplayMode.List)
+                }
+
+                androidx.compose.material3.HorizontalDivider()
+
+                tachiyomi.presentation.core.components.HeadingItem(MR.strings.pref_panorama_cover)
+
+                PanoramaMode.entries.forEach { panoMode ->
+                    RadioMenuItem(
+                        text = { Text(text = stringResource(panoMode.getLabelRes())) },
+                        isChecked = panoramaMode == panoMode,
+                    ) {
+                        selectingDisplayMode = false
+                        uiPreferences.browsePanoramaMode().set(panoMode)
+                    }
                 }
             }
         },

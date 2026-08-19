@@ -6,13 +6,25 @@ import eu.kanade.tachiyomi.source.model.SAnime
 import eu.kanade.tachiyomi.source.model.SEpisode
 import eu.kanade.tachiyomi.source.model.Video
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
+import eu.kanade.tachiyomi.animesource.PreferenceScreen
+import android.content.SharedPreferences
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import rx.Observable
 
 @Suppress("OverridingDeprecatedMember", "DEPRECATION")
-abstract class DelegatedHttpSource(val delegate: HttpSource) : HttpSource() {
+abstract class DelegatedHttpSource(val delegate: HttpSource) : HttpSource(), ConfigurableAnimeSource {
+
+    override fun getSourcePreferences(): SharedPreferences {
+        return (delegate as? ConfigurableAnimeSource)?.getSourcePreferences()
+            ?: super.getSourcePreferences()
+    }
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        (delegate as? ConfigurableAnimeSource)?.setupPreferenceScreen(screen)
+    }
     /**
      * Returns the request for the popular anime given the page.
      *
@@ -131,6 +143,11 @@ abstract class DelegatedHttpSource(val delegate: HttpSource) : HttpSource() {
      * Note the generated id sets the sign bit to 0.
      */
     override val id get() = delegate.id
+
+    /**
+     * Preferences for the source.
+     */
+    override val preferences get() = delegate.preferences
 
     /**
      * Default network client for doing requests.

@@ -64,6 +64,7 @@ object SettingsLibraryScreen : SearchableSettings {
                 libraryPreferences,
             ),
             getGlobalUpdateGroup(allAnimeCategories, libraryPreferences),
+            getBehaviorGroup(libraryPreferences),
             getEpisodeSwipeActionsGroup(libraryPreferences),
         )
     }
@@ -94,7 +95,11 @@ object SettingsLibraryScreen : SearchableSettings {
                         count = userAnimeCategoriesCount,
                         userAnimeCategoriesCount,
                     ),
-                    onClick = { navigator.push(CategoryScreen) },
+                    onClick = {
+                        if (navigator.lastItem.key != CategoryScreen.key) {
+                            navigator.push(CategoryScreen)
+                        }
+                    },
                 ),
                 Preference.PreferenceItem.ListPreference(
                     pref = libraryPreferences.defaultCategory(),
@@ -178,7 +183,7 @@ object SettingsLibraryScreen : SearchableSettings {
                     },
                 ),
                 Preference.PreferenceItem.MultiSelectListPreference(
-                    pref = libraryPreferences.autoUpdateDeviceRestrictions(),
+                    pref = libraryPreferences.autoUpdateDeviceRestrictions,
                     enabled = autoUpdateInterval > 0,
                     title = stringResource(MR.strings.pref_library_update_restriction),
                     subtitle = stringResource(MR.strings.restrictions),
@@ -222,12 +227,12 @@ object SettingsLibraryScreen : SearchableSettings {
                 ),
                 // SY <--
                 Preference.PreferenceItem.SwitchPreference(
-                    pref = libraryPreferences.autoUpdateMetadata(),
+                    pref = libraryPreferences.autoUpdateMetadata,
                     title = stringResource(MR.strings.pref_library_update_refresh_metadata),
                     subtitle = stringResource(MR.strings.pref_library_update_refresh_metadata_summary),
                 ),
                 Preference.PreferenceItem.MultiSelectListPreference(
-                    pref = libraryPreferences.autoUpdateAnimeRestrictions(),
+                    pref = libraryPreferences.autoUpdateAnimeRestrictions,
                     title = stringResource(MR.strings.pref_library_update_smart_update),
                     entries = persistentMapOf(
                         ANIME_HAS_UNSEEN to stringResource(MR.strings.pref_update_only_completely_read),
@@ -239,6 +244,59 @@ object SettingsLibraryScreen : SearchableSettings {
                 Preference.PreferenceItem.SwitchPreference(
                     pref = libraryPreferences.newShowUpdatesCount(),
                     title = stringResource(MR.strings.pref_library_update_show_tab_badge),
+                ),
+                // KMK -->
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = libraryPreferences.showUpdatingProgressBanner(),
+                    title = stringResource(MR.strings.pref_show_updating_progress_banner),
+                ),
+                // KMK <--
+            ),
+        )
+    }
+
+    @Composable
+    private fun getBehaviorGroup(
+        libraryPreferences: LibraryPreferences,
+    ): Preference.PreferenceGroup {
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_behavior),
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = libraryPreferences.showEmptyCategoriesSearch(),
+                    title = stringResource(MR.strings.pref_show_empty_categories_search),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = libraryPreferences.syncOnAdd(),
+                    title = stringResource(MR.strings.pref_sync_manga_on_add),
+                    subtitle = stringResource(MR.strings.pref_sync_manga_on_add_description),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = libraryPreferences.showEpisodeSummary(),
+                    title = stringResource(MR.strings.pref_show_episode_summary),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = libraryPreferences.showEpisodeThumbnail(),
+                    title = stringResource(MR.strings.pref_show_episode_thumbnail),
+                ),
+                // SY -->
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = libraryPreferences.skipDupeEpisodes(),
+                    title = stringResource(AMR.strings.pref_skip_dupe_episodes),
+                ),
+                // SY <--
+                Preference.PreferenceItem.SwitchPreference(
+                    pref = libraryPreferences.hideMissingEpisodes(),
+                    title = stringResource(MR.strings.pref_hide_missing_episodes),
+                ),
+                Preference.PreferenceItem.ListPreference(
+                    pref = libraryPreferences.seasonGroupingMode(),
+                    title = "Season grouping",
+                    entries = persistentMapOf(
+                        LibraryPreferences.SeasonGrouping.Disabled to "Disabled",
+                        LibraryPreferences.SeasonGrouping.Headers to "Headers",
+                        LibraryPreferences.SeasonGrouping.Tabs to "Tabs",
+                    ),
                 ),
             ),
         )
@@ -292,4 +350,6 @@ object SettingsLibraryScreen : SearchableSettings {
             ),
         )
     }
+
+
 }

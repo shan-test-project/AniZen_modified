@@ -6,8 +6,6 @@ import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.domain.track.service.DelayedTrackingUpdateJob
 import eu.kanade.domain.track.store.DelayedTrackingStore
 import eu.kanade.tachiyomi.data.track.TrackerManager
-import eu.kanade.domain.track.service.TrackPreferences
-import eu.kanade.tachiyomi.data.track.local.LocalTracker
 import eu.kanade.tachiyomi.util.system.isOnline
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -24,7 +22,6 @@ class TrackEpisode(
     private val trackerManager: TrackerManager,
     private val insertTrack: InsertTrack,
     private val delayedTrackingStore: DelayedTrackingStore,
-    private val trackPreferences: TrackPreferences,
     private val getAnime: GetAnime,
     private val getEpisodesByAnimeId: GetEpisodesByAnimeId,
 ) {
@@ -33,22 +30,6 @@ class TrackEpisode(
         withNonCancellableContext {
             val tracks = getTracks.await(animeId)
             if (tracks.isEmpty()) {
-                if (trackPreferences.autoTrackWhenWatching().get()) {
-                    val anime = getAnime.await(animeId) ?: return@withNonCancellableContext
-                    val episodes = getEpisodesByAnimeId.await(animeId)
-                    val localTrack = eu.kanade.tachiyomi.data.database.models.Track.create(TrackerManager.LOCAL).apply {
-                        this.anime_id = animeId
-                        this.title = anime.title
-                        this.last_episode_seen = episodeNumber
-                        this.total_episodes = episodes.size.toLong()
-                        this.status = if (episodeNumber >= episodes.size && episodes.isNotEmpty()) {
-                            eu.kanade.tachiyomi.data.track.local.LocalTracker.COMPLETED
-                        } else {
-                            eu.kanade.tachiyomi.data.track.local.LocalTracker.WATCHING
-                        }
-                    }.toDomainTrack(idRequired = false)!!
-                    insertTrack.await(localTrack)
-                }
                 return@withNonCancellableContext
             }
 
@@ -82,48 +63,4 @@ class TrackEpisode(
         }
     }
 
-    suspend fun trackStatus(context: Context, animeId: Long, status: Long) {
-        withNonCancellableContext {
-            val tracks = getTracks.await(animeId)
-            if (tracks.isEmpty()) {
-                if (trackPreferences.autoTrackWhenWatching().get()) {
-                    val anime = getAnime.await(animeId) ?: return@withNonCancellableContext
-                    val episodes = getEpisodesByAnimeId.await(animeId)
-                    val localTrack = eu.kanade.tachiyomi.data.database.models.Track.create(TrackerManager.LOCAL).apply {
-                        this.anime_id = animeId
-                        this.title = anime.title
-                        this.last_episode_seen = 0.0
-                        this.total_episodes = episodes.size.toLong()
-                        this.status = status
-                    }.toDomainTrack(idRequired = false)!!
-                    insertTrack.await(localTrack)
-                }
-                return@withNonCancellableContext
-            }
-
-            tracks.forEach { track ->
-                val service = trackerManager.get(track.trackerId) ?: return@forEach
-                if (!service.isLoggedIn) return@forEach
-                
-                val trackerStatus = when (status) {
-                    eu.kanade.tachiyomi.data.track.local.LocalTracker.WATCHING -> service.animeService.getWatchingStatus()
-                    eu.kanade.tachiyomi.data.track.local.LocalTracker.COMPLETED -> service.animeService.getCompletionStatus()
-                    // Fallback to local status if not specialized in interface
-                    else -> status
-                }
-
-                if (track.status == trackerStatus) return@forEach
-                
-                runCatching {
-                    val updatedTrack = track.copy(status = trackerStatus)
-                    val finalTrack = if (status == eu.kanade.tachiyomi.data.track.local.LocalTracker.WATCHING) {
-                        updatedTrack.copy(finishDate = 0L)
-                    } else updatedTrack
-
-                    val dbTrack = service.animeService.update(finalTrack.toDbTrack(), false)
-                    insertTrack.await(dbTrack.toDomainTrack(idRequired = true)!!)
-                }
-            }
-        }
-    }
 }

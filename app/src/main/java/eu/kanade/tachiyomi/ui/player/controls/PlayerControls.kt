@@ -43,6 +43,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -72,6 +73,7 @@ import eu.kanade.tachiyomi.ui.player.controls.components.BrightnessSlider
 import eu.kanade.tachiyomi.ui.player.controls.components.ControlsButton
 import eu.kanade.tachiyomi.ui.player.controls.components.DoubleSpeedPlayerUpdate
 import eu.kanade.tachiyomi.ui.player.controls.components.SeekbarWithTimers
+import eu.kanade.tachiyomi.ui.player.controls.components.ThumbnailPreview
 import eu.kanade.tachiyomi.ui.player.controls.components.TextPlayerUpdate
 import eu.kanade.tachiyomi.ui.player.controls.components.VolumeSlider
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.toFixed
@@ -88,6 +90,16 @@ import kotlinx.coroutines.flow.update
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
+import eu.kanade.tachiyomi.ui.player.PlayerButton
+import eu.kanade.tachiyomi.ui.player.parseButtons
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -114,20 +126,42 @@ fun PlayerControls(
     val areControlsLocked by viewModel.areControlsLocked.collectAsState()
     val seekBarShown by viewModel.seekBarShown.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val pausedForCache by viewModel.pausedForCache.collectAsState()
     val isLoadingEpisode by viewModel.isLoadingEpisode.collectAsState()
+    val isStopped by viewModel.isStopped.collectAsState()
     val duration by viewModel.duration.collectAsState()
     val position by viewModel.pos.collectAsState()
     val paused by viewModel.paused.collectAsState()
     val gestureSeekAmount by viewModel.gestureSeekAmount.collectAsState()
     val doubleTapSeekAmount by viewModel.doubleTapSeekAmount.collectAsState()
+    val showDoubleTapOvals by playerPreferences.showDoubleTapOvals().collectAsState()
+    val showSeekIcon by playerPreferences.showSeekIcon().collectAsState()
+    val showSeekTime by playerPreferences.showSeekTimeWhileSeeking().collectAsState()
     val seekText by viewModel.seekText.collectAsState()
     val currentChapter by viewModel.currentChapter.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
     val currentBrightness by viewModel.currentBrightness.collectAsState()
 
     val playerTimeToDisappear by playerPreferences.playerTimeToDisappear().collectAsState()
-    var isSeeking by remember { mutableStateOf(false) }
     var resetControls by remember { mutableStateOf(true) }
+    val isSeekingUI by viewModel.isSeekingUI.collectAsState()
+    val seekPosition by viewModel.seekPosition.collectAsState()
+    val chaptersList = remember(chapters) {
+        chapters.map { it.toSegment() }
+    }
+
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    val topRightButtons by playerPreferences.topRightControls().collectAsState()
+    val bottomLeftButtons by playerPreferences.bottomLeftControls().collectAsState()
+    val bottomRightButtons by playerPreferences.bottomRightControls().collectAsState()
+    val portraitBottomButtons by playerPreferences.portraitBottomControls().collectAsState()
+
+    val topRightButtonsList = remember(topRightButtons) { parseButtons(topRightButtons) }
+    val bottomLeftButtonsList = remember(bottomLeftButtons) { parseButtons(bottomLeftButtons) }
+    val bottomRightButtonsList = remember(bottomRightButtons) { parseButtons(bottomRightButtons) }
+    val portraitBottomButtonsList = remember(portraitBottomButtons) { parseButtons(portraitBottomButtons) }
 
     val customButtons by viewModel.customButtons.collectAsState()
     val customButton by viewModel.primaryButton.collectAsState()
@@ -135,10 +169,10 @@ fun PlayerControls(
     LaunchedEffect(
         controlsShown,
         paused,
-        isSeeking,
+        isSeekingUI,
         resetControls,
     ) {
-        if (controlsShown && !paused && !isSeeking) {
+        if (controlsShown && !paused && !isSeekingUI) {
             delay(playerTimeToDisappear.toLong())
             viewModel.hideControls()
         }
@@ -153,7 +187,14 @@ fun PlayerControls(
         viewModel = viewModel,
         interactionSource = interactionSource,
     )
-    DoubleTapToSeekOvals(doubleTapSeekAmount, seekText, interactionSource)
+    DoubleTapToSeekOvals(
+        amount = doubleTapSeekAmount,
+        text = seekText,
+        showOvals = showDoubleTapOvals,
+        showSeekIcon = showSeekIcon,
+        showSeekTime = showSeekTime,
+        interactionSource = interactionSource,
+    )
     CompositionLocalProvider(
         LocalRippleConfiguration provides playerRippleConfiguration,
         LocalPlayerButtonsClickEvent provides { resetControls = !resetControls },
@@ -182,6 +223,7 @@ fun PlayerControls(
                     unlockControlsButton,
                     bottomRightControls, bottomLeftControls,
                     centerControls, seekbar, playerUpdates,
+                    portraitBottomBar, thumbnail,
                 ) = createRefs()
 
                 val hasPreviousEpisode by viewModel.hasPreviousEpisode.collectAsState()
@@ -318,6 +360,9 @@ fun PlayerControls(
                         is PlayerUpdates.ShowTextResource -> TextPlayerUpdate(
                             stringResource((currentPlayerUpdate as PlayerUpdates.ShowTextResource).textResource),
                         )
+                        is PlayerUpdates.VideoZoom -> TextPlayerUpdate(
+                            "Zoom: ${((currentPlayerUpdate as PlayerUpdates.VideoZoom).zoom * 100).toInt()}%"
+                        )
                         else -> {}
                     }
                 }
@@ -327,20 +372,22 @@ fun PlayerControls(
                     enter = fadeIn(),
                     exit = fadeOut(),
                     modifier = Modifier.constrainAs(unlockControlsButton) {
-                        top.linkTo(parent.top, spacing.medium)
-                        start.linkTo(parent.start, spacing.medium)
+                        bottom.linkTo(parent.bottom, spacing.extraLarge)
+                        start.linkTo(parent.start)
+                        end.linkTo(parent.end)
                     },
                 ) {
-                    ControlsButton(
-                        Icons.Filled.Lock,
-                        onClick = { viewModel.unlockControls() },
+                    eu.kanade.tachiyomi.ui.player.controls.components.SlideToUnlock(
+                        onUnlock = { viewModel.unlockControls() },
                     )
                 }
-                AnimatedVisibility(
-                    visible =
-                    (controlsShown && !areControlsLocked || gestureSeekAmount != null) ||
-                        isLoading ||
-                        isLoadingEpisode,
+                val isLongPressing by viewModel.isLongPressing.collectAsState()
+                 AnimatedVisibility(
+                    visible = (
+                        (controlsShown && !areControlsLocked || gestureSeekAmount != null) ||
+                            ((isLoading || pausedForCache) && !isStopped) ||
+                            isLoadingEpisode
+                        ) && !isLongPressing,
                     enter = fadeIn(playerControlsEnterAnimationSpec()),
                     exit = fadeOut(playerControlsExitAnimationSpec()),
                     modifier = Modifier.constrainAs(centerControls) {
@@ -356,7 +403,8 @@ fun PlayerControls(
                         onSkipPrevious = { viewModel.changeEpisode(true) },
                         hasNext = hasNextEpisode,
                         onSkipNext = { viewModel.changeEpisode(false) },
-                        isLoading = isLoading,
+                        isStopped = isStopped,
+                        isLoading = isLoading || pausedForCache,
                         isLoadingEpisode = isLoadingEpisode,
                         controlsShown = controlsShown,
                         areControlsLocked = areControlsLocked,
@@ -369,7 +417,7 @@ fun PlayerControls(
                     )
                 }
                 AnimatedVisibility(
-                    visible = (controlsShown || seekBarShown) && !areControlsLocked,
+                    visible = (controlsShown || seekBarShown) && !areControlsLocked && !isLongPressing,
                     enter = if (!reduceMotion) {
                         slideInVertically(playerControlsEnterAnimationSpec()) { it } +
                             fadeIn(playerControlsEnterAnimationSpec())
@@ -389,26 +437,68 @@ fun PlayerControls(
                     val invertDuration by playerPreferences.invertDuration().collectAsState()
                     val readAhead by viewModel.readAhead.collectAsState()
                     val preciseSeeking by gesturePreferences.playerSmoothSeek().collectAsState()
+
+                    var wasPlayerAlreadyPause by remember { mutableStateOf(false) }
+                    var sliderPosition by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+                    var lastTargetSeekPos by remember { mutableStateOf<Float?>(null) }
+
+                    LaunchedEffect(position, seekPosition, isSeekingUI) {
+                        if (isSeekingUI) {
+                            sliderPosition = seekPosition
+                            lastTargetSeekPos = seekPosition
+                        } else {
+                            val target = lastTargetSeekPos
+                            if (target != null) {
+                                if (kotlin.math.abs(position - target) > 1.5f) {
+                                    sliderPosition = target
+                                } else {
+                                    sliderPosition = position
+                                    lastTargetSeekPos = null
+                                }
+                            } else {
+                                sliderPosition = position
+                            }
+                        }
+                    }
+
+                    LaunchedEffect(isSeekingUI) {
+                        if (!isSeekingUI && lastTargetSeekPos != null) {
+                            kotlinx.coroutines.delay(1000)
+                            lastTargetSeekPos = null
+                        }
+                    }
+
                     SeekbarWithTimers(
-                        position = position,
+                        position = sliderPosition,
                         duration = duration,
                         readAheadValue = readAhead,
                         onValueChange = {
-                            isSeeking = true
-                            viewModel.updatePlayBackPos(it)
-                            viewModel.seekTo(it.toInt(), preciseSeeking)
+                            if (!viewModel.isSeekingUI.value) {
+                                wasPlayerAlreadyPause = viewModel.paused.value
+                                viewModel.pause()
+                                viewModel.updateIsSeeking(true)
+                            }
+                            sliderPosition = it
+                            viewModel.updateSeekPos(it)
+                            viewModel.scrubSeekTo(it.toInt(), false)
                         },
-                        onValueChangeFinished = { isSeeking = false },
+                        onValueChangeFinished = {
+                            viewModel.updateIsSeeking(false)
+                            viewModel.seekTo(sliderPosition.toInt(), preciseSeeking)
+                            if (!wasPlayerAlreadyPause) {
+                                viewModel.unpause()
+                            }
+                        },
                         timersInverted = Pair(false, invertDuration),
                         durationTimerOnCLick = { playerPreferences.invertDuration().set(!invertDuration) },
                         positionTimerOnClick = {},
-                        chapters = chapters.map { it.toSegment() }.toImmutableList(),
+                        chapters = chaptersList,
                     )
                 }
                 val mediaTitle by viewModel.mediaTitle.collectAsState()
                 val animeTitle by viewModel.animeTitle.collectAsState()
                 AnimatedVisibility(
-                    controlsShown && !areControlsLocked,
+                    controlsShown && !areControlsLocked && !isLongPressing,
                     enter = if (!reduceMotion) {
                         slideInHorizontally(playerControlsEnterAnimationSpec()) { -it } +
                             fadeIn(playerControlsEnterAnimationSpec())
@@ -428,6 +518,8 @@ fun PlayerControls(
                         end.linkTo(topRightControls.start)
                     },
                 ) {
+                    val animeTitle by viewModel.animeTitle.collectAsState()
+                    val mediaTitle by viewModel.mediaTitle.collectAsState()
                     TopLeftPlayerControls(
                         animeTitle = animeTitle,
                         mediaTitle = mediaTitle,
@@ -436,10 +528,8 @@ fun PlayerControls(
                     )
                 }
                 // Top right controls
-                val autoPlayEnabled by playerPreferences.autoplayEnabled().collectAsState()
-                val isEpisodeOnline by viewModel.isEpisodeOnline.collectAsState()
                 AnimatedVisibility(
-                    controlsShown && !areControlsLocked,
+                    controlsShown && !areControlsLocked && !isLongPressing,
                     enter = if (!reduceMotion) {
                         slideInHorizontally(playerControlsEnterAnimationSpec()) { it } +
                             fadeIn(playerControlsEnterAnimationSpec())
@@ -458,26 +548,49 @@ fun PlayerControls(
                     },
                 ) {
                     TopRightPlayerControls(
-                        autoPlayEnabled = autoPlayEnabled,
-                        onToggleAutoPlay = { viewModel.setAutoPlay(it) },
-                        onSubtitlesClick = { viewModel.showSheet(Sheets.SubtitleTracks) },
-                        onSubtitlesLongClick = { viewModel.showPanel(Panels.SubtitleSettings) },
-                        onAudioClick = { viewModel.showSheet(Sheets.AudioTracks) },
-                        onAudioLongClick = { viewModel.showPanel(Panels.AudioDelay) },
-                        onQualityClick = { viewModel.showSheet(Sheets.QualityTracks) },
-                        isEpisodeOnline = isEpisodeOnline,
-                        onMoreClick = { viewModel.showSheet(Sheets.More) },
-                        onMoreLongClick = { viewModel.showPanel(Panels.VideoFilters) },
-                        castState = castState,
+                        buttons = topRightButtonsList,
+                        viewModel = viewModel,
+                        castManager = castManager,
+                        onBackPress = onBackPress,
                         onCastClick = { showCastSheet = true },
-                        isCastEnabled = { playerPreferences.enableCast().get() },
                     )
                 }
-                // Bottom right controls
-                val skipIntroButton by viewModel.skipIntroText.collectAsState()
-                val customButtonTitle by viewModel.primaryButtonTitle.collectAsState()
+
+                // Portrait bottom bar
                 AnimatedVisibility(
-                    controlsShown && !areControlsLocked,
+                    visible = controlsShown && !areControlsLocked && !isLongPressing && !isLandscape,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.constrainAs(portraitBottomBar) {
+                        bottom.linkTo(seekbar.top, spacing.medium)
+                        start.linkTo(parent.start)
+                        end.linkTo(parent.end)
+                        width = Dimension.fillToConstraints
+                    },
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        portraitBottomButtonsList.forEach { button ->
+                            RenderPlayerButton(
+                                button = button,
+                                viewModel = viewModel,
+                                castManager = castManager,
+                                onBackPress = onBackPress,
+                                onCastClick = { showCastSheet = true },
+                                containerButtons = portraitBottomButtonsList,
+                            )
+                        }
+                    }
+                }
+
+                // Bottom right controls
+                AnimatedVisibility(
+                    controlsShown && !areControlsLocked && !isLongPressing && isLandscape,
                     enter = if (!reduceMotion) {
                         slideInHorizontally(playerControlsEnterAnimationSpec()) { it } +
                             fadeIn(playerControlsEnterAnimationSpec())
@@ -495,33 +608,17 @@ fun PlayerControls(
                         end.linkTo(seekbar.end)
                     },
                 ) {
-                    val activity = LocalContext.current as PlayerActivity
                     BottomRightPlayerControls(
-                        customButton = customButton,
-                        customButtonTitle = customButtonTitle,
-                        skipIntroButton = skipIntroButton,
-                        onPressSkipIntroButton = viewModel::onSkipIntro,
-                        isPipAvailable = activity.isPipSupportedAndEnabled,
-                        onPipClick = {
-                            if (!viewModel.isLoadingEpisode.value) {
-                                activity.enterPictureInPictureMode(activity.createPipParams())
-                            }
-                        },
-                        onAspectClick = {
-                            viewModel.changeVideoAspect(
-                                when (aspectRatio) {
-                                    VideoAspect.Fit -> VideoAspect.Stretch
-                                    VideoAspect.Stretch -> VideoAspect.Crop
-                                    VideoAspect.Crop -> VideoAspect.Fit
-                                },
-                            )
-                        },
+                        buttons = bottomRightButtonsList,
+                        viewModel = viewModel,
+                        castManager = castManager,
+                        onBackPress = onBackPress,
+                        onCastClick = { showCastSheet = true },
                     )
                 }
                 // Bottom left controls
-                val playbackSpeed by viewModel.playbackSpeed.collectAsState()
                 AnimatedVisibility(
-                    controlsShown && !areControlsLocked,
+                    controlsShown && !areControlsLocked && !isLongPressing && isLandscape,
                     enter = if (!reduceMotion) {
                         slideInHorizontally(playerControlsEnterAnimationSpec()) { -it } +
                             fadeIn(playerControlsEnterAnimationSpec())
@@ -542,16 +639,28 @@ fun PlayerControls(
                     },
                 ) {
                     BottomLeftPlayerControls(
-                        playbackSpeed,
-                        currentChapter = currentChapter?.toSegment(),
-                        onLockControls = viewModel::lockControls,
-                        onCycleRotation = viewModel::cycleScreenRotations,
-                        onPlaybackSpeedChange = {
-                            MPVLib.setPropertyDouble("speed", it.toDouble())
-                        },
-                        onOpenSheet = viewModel::showSheet,
+                        buttons = bottomLeftButtonsList,
+                        viewModel = viewModel,
+                        castManager = castManager,
+                        onBackPress = onBackPress,
+                        onCastClick = { showCastSheet = true },
                     )
                 }
+
+                val thumbnailImage by viewModel.thumbnailImage.collectAsState()
+                ThumbnailPreview(
+                    visible = isSeekingUI,
+                    image = thumbnailImage,
+                    positionSProvider = run {
+                        val currentSeekPosition = androidx.compose.runtime.rememberUpdatedState(seekPosition.toLong())
+                        remember { { currentSeekPosition.value } }
+                    },
+                    durationS = duration.toLong(),
+                    chapters = chaptersList,
+                    modifier = Modifier.fillMaxWidth().constrainAs(thumbnail) {
+                        bottom.linkTo(seekbar.top, spacing.medium)
+                    },
+                )
             }
         }
 
@@ -565,6 +674,20 @@ fun PlayerControls(
         val hosterState by viewModel.hosterState.collectAsState()
         val expandedState by viewModel.hosterExpandedList.collectAsState()
         val selectedHosterVideoIndex by viewModel.selectedHosterVideoIndex.collectAsState()
+        val currentAnime by viewModel.currentAnime.collectAsState()
+        val perAnimeDefaultStream by playerPreferences.perAnimeDefaultStream().collectAsState()
+        val perAnimeDefaultStreamData by playerPreferences.perAnimeDefaultStreamData().collectAsState()
+        val showDefaultStreamHighlight by playerPreferences.showDefaultStreamHighlight().collectAsState()
+        val autoScrollDefaultStream by playerPreferences.autoScrollDefaultStream().collectAsState()
+        val defaultStreamSelector = remember(
+            currentAnime?.id,
+            perAnimeDefaultStream,
+            perAnimeDefaultStreamData,
+        ) {
+            if (!perAnimeDefaultStream) "" else viewModel.getEffectiveDefaultStreamSelector()
+        }
+        val highlightDefaultStream = perAnimeDefaultStream && showDefaultStreamHighlight
+        val autoScrollToDefault = perAnimeDefaultStream && autoScrollDefaultStream
         val decoder by viewModel.currentDecoder.collectAsState()
         val speed by viewModel.playbackSpeed.collectAsState()
         val sleepTimerTimeRemaining by viewModel.remainingTime.collectAsState()
@@ -574,11 +697,12 @@ fun PlayerControls(
 
         PlayerSheets(
             sheetShown = sheetShown,
-            subtitles = subtitles.toImmutableList(),
-            selectedSubtitles = selectedSubtitles.toList().toImmutableList(),
+            viewModel = viewModel,
+            subtitles = subtitles,
+            selectedSubtitles = selectedSubtitles.toList(),
             onAddSubtitle = viewModel::addSubtitle,
-            onSelectSubtitle = viewModel::selectSub,
-            audioTracks = audioTracks.toImmutableList(),
+            onSelectSubtitle = { viewModel.selectSub(it) },
+            audioTracks = audioTracks,
             selectedAudio = selectedAudio,
             onAddAudio = viewModel::addAudio,
             onSelectAudio = viewModel::selectAudio,
@@ -590,10 +714,13 @@ fun PlayerControls(
             selectedVideoIndex = selectedHosterVideoIndex,
             onClickHoster = viewModel::onHosterClicked,
             onClickVideo = viewModel::onVideoClicked,
+            defaultStreamSelector = defaultStreamSelector,
+            highlightDefaultStream = highlightDefaultStream,
+            autoScrollToDefault = autoScrollToDefault,
             displayHosters = Pair(showFailedHosters, emptyHosters),
 
             chapter = currentChapter?.toSegment(),
-            chapters = chapters.map { it.toSegment() }.toImmutableList(),
+            chapters = chaptersList,
             onSeekToChapter = {
                 viewModel.selectChapter(it)
                 viewModel.dismissSheet()
@@ -605,7 +732,7 @@ fun PlayerControls(
             onSpeedChange = { MPVLib.setPropertyDouble("speed", it.toFixed(2).toDouble()) },
             sleepTimerTimeRemaining = sleepTimerTimeRemaining,
             onStartSleepTimer = viewModel::startTimer,
-            buttons = customButtons.getButtons().toImmutableList(),
+            buttons = customButtons.getButtons(),
 
             showSubtitles = showSubtitles,
             onToggleShowSubtitles = { subtitlePreferences.screenshotSubtitles().set(it) },
@@ -623,10 +750,12 @@ fun PlayerControls(
             dismissSheet = dismissSheet,
         )
         val panel by viewModel.panelShown.collectAsState()
-        PlayerPanels(
-            panelShown = panel,
-            onDismissRequest = { viewModel.showPanel(Panels.None) },
-        )
+        key("player-panels") {
+            PlayerPanels(
+                panelShown = panel,
+                onDismissRequest = { viewModel.showPanel(Panels.None) },
+            )
+        }
 
         val activity = LocalContext.current as PlayerActivity
         val dialog by viewModel.dialogShown.collectAsState()

@@ -38,10 +38,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import eu.kanade.domain.connections.service.ConnectionsPreferences
+import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
+import eu.kanade.tachiyomi.data.connections.discord.DiscordScreen
+import uy.kohesive.injekt.injectLazy
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -55,9 +60,9 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.core.util.ifSourcesLoaded
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.anime.DuplicateAnimeDialog
 import eu.kanade.presentation.browse.BrowseSourceContent
-import eu.kanade.presentation.browse.MissingSourceScreen
 import eu.kanade.presentation.browse.components.BrowseSourceToolbar
 import eu.kanade.presentation.browse.components.RemoveAnimeDialog
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
@@ -73,6 +78,7 @@ import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel.Listi
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
@@ -85,14 +91,15 @@ import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
-import tachiyomi.presentation.core.util.collectAsState
-import tachiyomi.source.local.LocalSource
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
+import tachiyomi.source.localanime.LocalAnimeSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 data class BrowseSourceScreen(
     private val sourceId: Long,
-    private val listingQuery: String?,
+    private val listingQuery: String? = null,
+    private val savedSearchId: Long? = null,
 ) : Screen(), AssistContentScreen {
 
     private var assistUrl: String? = null
@@ -106,7 +113,14 @@ data class BrowseSourceScreen(
             return
         }
 
-        val screenModel = rememberScreenModel { BrowseSourceScreenModel(sourceId, listingQuery) }
+        val uiPreferences = remember { Injekt.get<UiPreferences>() }
+        val screenModel = rememberScreenModel {
+            BrowseSourceScreenModel(
+                sourceId = sourceId,
+                listingQuery = listingQuery,
+                savedSearchId = savedSearchId,
+            )
+        }
         val state by screenModel.state.collectAsState()
 
         val navigator = LocalNavigator.currentOrThrow
@@ -120,20 +134,25 @@ data class BrowseSourceScreen(
 
         BackHandler(enabled = state.selectionMode, onBack = navigateUp)
 
-        if (screenModel.source is StubSource) {
-            MissingSourceScreen(
-                source = screenModel.source,
-                navigateUp = navigateUp,
-            )
-            return
-        }
-
         val scope = rememberCoroutineScope()
         val haptic = LocalHapticFeedback.current
         val uriHandler = LocalUriHandler.current
         val snackbarHostState = remember { SnackbarHostState() }
 
-        val onHelpClick = { uriHandler.openUri(LocalSource.HELP_URL) }
+        val context = LocalContext.current
+
+        LaunchedEffect(screenModel.source) {
+            val connectionsPreferences: ConnectionsPreferences by injectLazy()
+            if (connectionsPreferences.enableDiscordRPC().get()) {
+                DiscordRPCService.setAnimeScreen(
+                    context = context,
+                    discordScreen = DiscordScreen.BROWSE,
+                    customState = screenModel.source.name,
+                )
+            }
+        }
+
+        val onHelpClick = { uriHandler.openUri(LocalAnimeSource.HELP_URL) }
         val onWebViewClick = f@{
             val source = screenModel.source as? HttpSource ?: return@f
             navigator.push(
@@ -145,14 +164,32 @@ data class BrowseSourceScreen(
             )
         }
 
-        LaunchedEffect(screenModel.source) {
-            assistUrl = (screenModel.source as? HttpSource)?.baseUrl
-        }
-
         val pagingFlow by screenModel.animePagerFlowFlow.collectAsState()
         val animeList = pagingFlow.collectAsLazyPagingItems()
 
+        if (screenModel.source is StubSource) {
+            eu.kanade.presentation.browse.BrowseSourceScreen(
+                source = screenModel.source,
+                animeList = animeList,
+                columns = screenModel.getColumnsPreference(LocalConfiguration.current.orientation),
+                displayMode = screenModel.displayMode,
+                snackbarHostState = snackbarHostState,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), // Not used for stub
+                onWebViewClick = onWebViewClick,
+                onHelpClick = onHelpClick,
+                onLocalSourceHelpClick = onHelpClick,
+                onAnimeClick = { _, _ -> },
+                onAnimeLongClick = { _, _ -> },
+                onBatchIncrement = {},
+                selection = persistentListOf(),
+                favoriteIds = persistentSetOf(),
+                entries = screenModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation),
+            )
+            return
+        }
+
         val entries = screenModel.getColumnsPreferenceForCurrentOrientation(LocalConfiguration.current.orientation)
+        val hazeEnabled by uiPreferences.hazeEnabled().collectAsStatePref()
 
         Scaffold(
             topBar = {
@@ -173,13 +210,13 @@ data class BrowseSourceScreen(
                         selectedCount = state.selection.size,
                         onUnselectAll = screenModel::clearSelection,
                         onSelectAll = {
-                            val items = animeList.itemSnapshotList.items.filterNotNull()
+                            val items = animeList.itemSnapshotList.items.filterNotNull().map { it.value }
                             if (items.isNotEmpty()) {
                                 screenModel.selectAll(items)
                             }
                         },
                         onInvertSelection = {
-                            screenModel.invertSelection(animeList.itemSnapshotList.items.filterNotNull())
+                            screenModel.invertSelection(animeList.itemSnapshotList.items.filterNotNull().map { it.value })
                         },
                     )
 
@@ -207,7 +244,8 @@ data class BrowseSourceScreen(
                                 Text(text = stringResource(MR.strings.popular))
                             },
                         )
-                        if ((screenModel.source as CatalogueSource).supportsLatest) {
+                        val catalogueSource = screenModel.source as? CatalogueSource
+                        if (catalogueSource?.supportsLatest == true) {
                             FilterChip(
                                 selected = state.listing == Listing.Latest,
                                 onClick = {
@@ -246,11 +284,6 @@ data class BrowseSourceScreen(
                         }
 
                         if (state.savedSearches.isNotEmpty()) {
-                            HorizontalDivider(
-                                modifier = Modifier
-                                    .padding(vertical = 4.dp)
-                                    .size(width = 1.dp, height = FilterChipDefaults.Height),
-                            )
                             state.savedSearches.forEach { savedSearch ->
                                 FilterChip(
                                     selected = state.currentSavedSearch?.id == savedSearch.id,
@@ -320,41 +353,50 @@ data class BrowseSourceScreen(
                 }
             },
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            hazeEnabled = hazeEnabled,
         ) { paddingValues ->
-            // Reactive Selection Engine: Observes load state to expand selection in 'Select All' mode.
-            val isSelectAllMode = state.isSelectAllMode
-            val targetCount = state.targetCount
-            val selectionSize = state.selection.size
-            val itemCount = animeList.itemCount
             var isPoking by remember { mutableStateOf(false) }
+            val isSelectAllMode = state.isSelectAllMode
+            
+            // Reactive Selection Engine: Observes load state to expand selection in 'Select All' mode.
+            // It selects items in batches of 60 and uses 'safe boundary access' to trigger Paging 3 fetches.
+            LaunchedEffect(isSelectAllMode) {
+                if (!isSelectAllMode) {
+                    isPoking = false
+                    return@LaunchedEffect
+                }
 
-            LaunchedEffect(isSelectAllMode, targetCount, itemCount) {
-                if (isSelectAllMode) {
+                snapshotFlow { 
+                    if (!state.isSelectAllMode) return@snapshotFlow null
+                    val target = state.targetCount
+                    val current = state.selection.size
+                    val total = animeList.itemCount
+                    Triple(target, current, total)
+                }
+                .collectLatest { data ->
+                    val (target, current, total) = data ?: return@collectLatest
+                    // Expand selection to available items, capped at the current targetCount.
                     val snapshot = animeList.itemSnapshotList
                     val loadedItems = snapshot.items.filterNotNull()
                     
-                    // Expand selection to available items, capped at the current targetCount.
-                    if (loadedItems.size > selectionSize) {
-                        val nextBatch = loadedItems.take(targetCount)
-                        if (nextBatch.size > selectionSize) {
+                    if (loadedItems.size > current) {
+                        val nextBatch = loadedItems.take(target).map { it.value }
+                        if (nextBatch.size > current) {
                             screenModel.updateSelection(nextBatch)
                         }
                     }
 
                     // TRIGGER THE NEXT PAGE (The Safe Poke) only if we haven't reached the manual targetCount
                     // AND we are not already poking.
-                    if (selectionSize < targetCount && itemCount > 0 && itemCount < targetCount && !isPoking) {
+                    if (current < target && total > 0 && total < target && !isPoking) {
                         val appendState = animeList.loadState.append
                         if (appendState is androidx.paging.LoadState.NotLoading && !appendState.endOfPaginationReached) {
                             isPoking = true
                             try {
-                                animeList[itemCount - 1]
+                                animeList[total - 1]
                             } catch (e: Exception) {}
-                            // The next itemCount update will trigger this LaunchedEffect again and reset isPoking
                         }
                     }
-                } else {
-                    isPoking = false
                 }
             }
             
@@ -376,20 +418,21 @@ data class BrowseSourceScreen(
                 onWebViewClick = onWebViewClick,
                 onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
                 onLocalSourceHelpClick = onHelpClick,
-                onAnimeClick = {
+                onAnimeClick = { anime, index ->
                     if (state.selectionMode) {
-                        screenModel.toggleSelection(it)
+                        screenModel.toggleSelection(anime, index)
                     } else {
-                        navigator.push((AnimeScreen(it.id, true)))
+                        navigator.push((AnimeScreen(anime.id, true)))
                     }
                 },
-                onAnimeLongClick = { anime ->
-                    if (state.selectionMode) {
-                        screenModel.toggleSelection(anime)
+                onAnimeLongClick = { anime, index ->
+                    val lastIndex = state.lastSelectedIndex
+                    if (state.selectionMode && lastIndex != null) {
+                        val items = animeList.itemSnapshotList.items.mapNotNull { it?.value }
+                        screenModel.selectRange(items, lastIndex, index)
                     } else {
-                        screenModel.toggleSelection(anime)
+                        screenModel.toggleSelection(anime, index)
                     }
-                    
                 },
                 selection = state.selection.toImmutableList(),
                 favoriteIds = state.favoriteIds,
@@ -489,7 +532,7 @@ data class BrowseSourceScreen(
                 MigrateDialog(
                     oldAnime = dialog.oldAnime,
                     newAnime = dialog.newAnime,
-                    screenModel = MigrateDialogScreenModel(),
+                    screenModel = MigrateDialogScreenModel(dialog.oldAnime.id),
                     onDismissRequest = onDismissRequest,
                     onClickTitle = { navigator.push(AnimeScreen(dialog.oldAnime.id)) },
                     onPopScreen = {
@@ -512,16 +555,18 @@ data class BrowseSourceScreen(
                     onDismissRequest = onDismissRequest,
                     onEditCategories = { navigator.push(CategoryScreen) },
                     onConfirm = { include, _ ->
-                        screenModel.changeAnimeFavorite(dialog.anime)
-                        screenModel.moveAnimeToCategories(dialog.anime, include)
+                        dialog.animes.forEach { anime ->
+                            screenModel.changeAnimeFavorite(anime)
+                            screenModel.moveAnimeToCategories(anime, include)
+                        }
+                        screenModel.clearSelection()
                     },
                 )
             }
             else -> {}
         }
 
-        // Reactive Selection Engine: Observes load state to expand selection in 'Select All' mode.
-        // It selects items in batches of 60 and uses 'safe boundary access' to trigger Paging 3 fetches.
+        // Search query observer: Handles text and genre search events.
         LaunchedEffect(Unit) {
             queryEvent.receiveAsFlow()
                 .collectLatest {

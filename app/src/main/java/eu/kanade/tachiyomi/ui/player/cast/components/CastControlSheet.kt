@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.FilledTonalButton
@@ -75,10 +76,10 @@ fun CastControlSheet(
                 modifier = Modifier.padding(vertical = 8.dp),
             )
             LazyColumn {
-                items(
+                itemsIndexed(
                     items = queueItems,
-                    key = { "cast-control-${it.itemId}" }
-                ) { item ->
+                    key = { index, it -> "cast-control-${it.itemId}-$index" }
+                ) { _, item ->
                     QueueItemRow(
                         item = item,
                         castManager = castManager,

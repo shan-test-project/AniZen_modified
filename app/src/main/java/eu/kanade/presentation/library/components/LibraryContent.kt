@@ -54,13 +54,15 @@ fun LibraryContent(
     onAnimeClicked: (Long) -> Unit,
     onContinueWatchingClicked: ((LibraryAnime) -> Unit)?,
     onToggleSelection: (LibraryAnime) -> Unit,
-    onToggleRangeSelection: (LibraryAnime) -> Unit,
+    onToggleRangeSelection: (LibraryAnime, Long) -> Unit,
     onRefresh: (Category?) -> Boolean,
     onGlobalSearchClicked: () -> Unit,
     getNumberOfAnimeForCategory: (Category) -> Int?,
     getDisplayMode: (Int) -> PreferenceMutableState<LibraryDisplayMode>,
     getColumnsForOrientation: (Boolean) -> PreferenceMutableState<Int>,
-    getAnimeLibraryForPage: (Int) -> ImmutableList<LibraryItem>,
+    getAnimeLibraryForPage: (Int) -> ImmutableList<eu.kanade.tachiyomi.ui.library.LibraryDisplayItem>,
+    onFolderClick: ((eu.kanade.tachiyomi.ui.library.LibraryDisplayItem.Folder) -> Unit)? = null,
+    onFolderLongClick: ((eu.kanade.tachiyomi.ui.library.LibraryDisplayItem.Folder) -> Unit)? = null,
 ) {
     val uiPreferences = remember { Injekt.get<UiPreferences>() }
     val containerStyles by uiPreferences.containerStyles().collectAsState()
@@ -88,7 +90,7 @@ fun LibraryContent(
             }
         }
 
-        if (showPageTabs && categories.size > 1) {
+        if (showPageTabs && categories.isNotEmpty() && (categories.size > 1 || !categories.first().isSystemCategory)) {
             LibraryTabs(
                 categories = categories,
                 pagerState = pagerState,
@@ -109,7 +111,7 @@ fun LibraryContent(
             modifier = Modifier.fillMaxSize(),
             refreshing = isRefreshing,
             onRefresh = {
-                val started = onRefresh(categories[pagerState.currentPage])
+                val started = onRefresh(categories.getOrNull(pagerState.currentPage))
                 if (!started) return@PullRefresh
                 scope.launch {
                     // Fake refresh status but hide it after a second as it's a long running task
@@ -123,6 +125,7 @@ fun LibraryContent(
             val pagerContent = @Composable {
                 LibraryPager(
                     state = pagerState,
+                    categories = categories,
                     contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
                     hasActiveFilters = hasActiveFilters,
                     selectedAnime = selection,
@@ -134,6 +137,8 @@ fun LibraryContent(
                     onClickAnime = onClickAnime,
                     onLongClickAnime = onToggleRangeSelection,
                     onClickContinueWatching = onContinueWatchingClicked,
+                    onFolderClick = onFolderClick,
+                    onFolderLongClick = onFolderLongClick,
                 )
             }
 

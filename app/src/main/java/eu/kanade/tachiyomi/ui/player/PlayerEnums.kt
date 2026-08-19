@@ -17,6 +17,25 @@
 
 package eu.kanade.tachiyomi.ui.player
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.AspectRatio
+import androidx.compose.material.icons.outlined.Audiotrack
+import androidx.compose.material.icons.outlined.Bookmarks
+import androidx.compose.material.icons.outlined.Cast
+import androidx.compose.material.icons.outlined.FastForward
+import androidx.compose.material.icons.outlined.HighQuality
+import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PictureInPictureAlt
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.ScreenRotation
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Subtitles
+import androidx.compose.material.icons.outlined.Title
+import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.ZoomIn
+import androidx.compose.ui.graphics.vector.ImageVector
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.player.settings.DecoderPreferences
 import tachiyomi.core.common.preference.Preference
@@ -48,6 +67,29 @@ enum class VideoAspect(val titleRes: StringResource) {
     Stretch(MR.strings.video_stretch_screen),
 }
 
+enum class PlayerEfficiency(val titleRes: StringResource) {
+    Automatic(MR.strings.pref_performance_profile_automatic),
+    MaxPerformance(MR.strings.pref_performance_profile_high),
+    Balanced(MR.strings.pref_performance_profile_mid),
+    PowerSaver(MR.strings.pref_performance_profile_low_power),
+}
+
+enum class PreloadState {
+    None,
+    MetadataLoading,
+    MetadataReady,
+    PreloadingBuffer,
+    BufferReady,
+    Failed,
+    Unavailable,
+}
+
+enum class PreloadMode(val titleRes: StringResource) {
+    Off(MR.strings.pref_preload_off),
+    WifiOnly(MR.strings.pref_preload_wifi),
+    Always(MR.strings.pref_preload_always),
+}
+
 /**
  * Action performed by a button, like double tap or media controls
  */
@@ -67,8 +109,8 @@ enum class LongPressAction(val stringRes: StringResource) {
 
 enum class PausedLongPressAction(val stringRes: StringResource) {
     DoNothing(stringRes = MR.strings.single_action_none),
-    Screenshot(stringRes = MR.strings.screenshot_header),
     Play2x(stringRes = MR.strings.player_sheets_speed_slider_label),
+    Screenshot(stringRes = MR.strings.screenshot_header),
 }
 
 /**
@@ -96,10 +138,12 @@ fun getDecoderFromValue(value: String?): Decoder {
     return Decoder.entries.firstOrNull { it.value == value } ?: Decoder.Auto
 }
 
-enum class Debanding {
-    None,
-    CPU,
-    GPU,
+enum class Debanding(
+    val titleRes: StringResource,
+) {
+    None(MR.strings.pref_debanding_none),
+    CPU(MR.strings.pref_debanding_cpu),
+    GPU(MR.strings.pref_debanding_gpu),
 }
 
 enum class Sheets {
@@ -109,6 +153,8 @@ enum class Sheets {
     AudioTracks,
     QualityTracks,
     Chapters,
+    VideoZoom,
+    AspectRatios,
     More,
     Screenshot,
 }
@@ -142,42 +188,43 @@ sealed class PlayerUpdates {
     data object AspectRatio : PlayerUpdates()
     data class ShowText(val value: String) : PlayerUpdates()
     data class ShowTextResource(val textResource: StringResource) : PlayerUpdates()
+    data class VideoZoom(val zoom: Float) : PlayerUpdates()
 }
 
 enum class DebandSettings(
     val titleRes: StringResource,
     val preference: (DecoderPreferences) -> Preference<Int>,
     val mpvProperty: String,
-    val start: Int = 0,
-    val end: Int = 100,
+    val start: Int,
+    val end: Int,
 ) {
     ITERATIONS(
         MR.strings.pref_debanding_title,
         { it.debandFilter() },
         "deband-iterations",
-        start = 1,
-        end = 4,
+        start = 0,
+        end = 16,
     ),
     THRESHOLD(
         MR.strings.player_sheets_deband_threshold,
         { it.debandThreshold() },
         "deband-threshold",
         start = 0,
-        end = 100,
+        end = 200,
     ),
     RANGE(
         MR.strings.player_sheets_deband_range,
         { it.debandRange() },
         "deband-range",
-        start = 0,
-        end = 100,
+        start = 1,
+        end = 64,
     ),
     GRAIN(
         MR.strings.player_sheets_filters_grain,
         { it.grainFilter() },
         "deband-grain",
         start = 0,
-        end = 100,
+        end = 200,
     ),
 }
 
@@ -216,16 +263,9 @@ enum class VideoFilters(
     SHARPEN(
         MR.strings.player_sheets_filters_sharpen,
         { it.sharpenFilter() },
-        "vf_sharpen",
-        min = 0,
-        max = 100,
-    ),
-    BLUR(
-        MR.strings.player_sheets_filters_blur,
-        { it.blurFilter() },
-        "vf_blur",
-        min = 0,
-        max = 100,
+        "sharpen",
+        min = -5,
+        max = 5,
     ),
 }
 
@@ -248,7 +288,7 @@ enum class VideoFilterTheme(
         description = "Vivid colors and sharper edges, best for modern anime.",
         contrast = 5,
         saturation = 20,
-        sharpen = 15,
+        sharpen = 1,
     ),
     Cinema(
         MR.strings.player_sheets_filters_theme_cinema,
@@ -304,3 +344,55 @@ enum class VideoFilterTheme(
     ),
 }
 
+enum class PlayerButton(
+    val titleRes: StringResource,
+) {
+    BackArrow(MR.strings.player_button_back_arrow),
+    VideoTitle(MR.strings.player_button_video_title),
+    AutoPlay(MR.strings.player_button_autoplay),
+    Cast(MR.strings.player_button_cast),
+    SubtitleTracks(MR.strings.player_button_subtitle_tracks),
+    AudioTracks(MR.strings.player_button_audio_tracks),
+    QualityTracks(MR.strings.player_button_quality_tracks),
+    MoreOptions(MR.strings.player_button_more_options),
+    PlaybackSpeed(MR.strings.player_button_playback_speed),
+    CurrentChapter(MR.strings.player_button_current_chapter),
+    LockControls(MR.strings.player_button_lock_controls),
+    ScreenRotation(MR.strings.player_button_screen_rotation),
+    PictureInPicture(MR.strings.player_button_picture_in_picture),
+    AspectRatio(MR.strings.player_button_aspect_ratio),
+    VideoZoom(MR.strings.player_button_video_zoom),
+    SkipIntro(MR.strings.player_button_skip_intro),
+    CustomButton(MR.strings.player_button_custom_button),
+}
+
+fun PlayerButton.getIcon(): ImageVector = when (this) {
+    PlayerButton.BackArrow -> Icons.AutoMirrored.Outlined.ArrowBack
+    PlayerButton.VideoTitle -> Icons.Outlined.Title
+    PlayerButton.AutoPlay -> Icons.Outlined.PlayCircle
+    PlayerButton.Cast -> Icons.Outlined.Cast
+    PlayerButton.SubtitleTracks -> Icons.Outlined.Subtitles
+    PlayerButton.AudioTracks -> Icons.Outlined.Audiotrack
+    PlayerButton.QualityTracks -> Icons.Outlined.HighQuality
+    PlayerButton.MoreOptions -> Icons.Outlined.MoreVert
+    PlayerButton.PlaybackSpeed -> Icons.Outlined.Speed
+    PlayerButton.CurrentChapter -> Icons.Outlined.Bookmarks
+    PlayerButton.LockControls -> Icons.Outlined.LockOpen
+    PlayerButton.ScreenRotation -> Icons.Outlined.ScreenRotation
+    PlayerButton.PictureInPicture -> Icons.Outlined.PictureInPictureAlt
+    PlayerButton.AspectRatio -> Icons.Outlined.AspectRatio
+    PlayerButton.VideoZoom -> Icons.Outlined.ZoomIn
+    PlayerButton.SkipIntro -> Icons.Outlined.FastForward
+    PlayerButton.CustomButton -> Icons.Outlined.TouchApp
+}
+
+val allPlayerButtons = PlayerButton.entries.filter { 
+    it != PlayerButton.BackArrow && it != PlayerButton.VideoTitle
+}
+
+enum class LayoutRegion(val titleRes: StringResource) {
+    TopRight(MR.strings.pref_player_layout_landscape_top_right),
+    BottomLeft(MR.strings.pref_player_layout_landscape_bottom_left),
+    BottomRight(MR.strings.pref_player_layout_landscape_bottom_right),
+    Portrait(MR.strings.pref_player_layout_portrait_bottom),
+}

@@ -20,6 +20,7 @@ package eu.kanade.tachiyomi.ui.player
 import android.content.Context
 import android.os.Build
 import android.os.Environment
+import android.view.Surface
 import android.util.AttributeSet
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
@@ -31,8 +32,11 @@ import eu.kanade.tachiyomi.ui.player.settings.AudioPreferences
 import eu.kanade.tachiyomi.ui.player.settings.DecoderPreferences
 import eu.kanade.tachiyomi.ui.player.settings.PlayerPreferences
 import eu.kanade.tachiyomi.ui.player.settings.SubtitlePreferences
+import eu.kanade.tachiyomi.ui.player.applyAnime4K
 import eu.kanade.tachiyomi.ui.player.buildVFChain
 import eu.kanade.tachiyomi.ui.player.utils.Anime4KManager
+import eu.kanade.tachiyomi.util.system.DeviceTierManager
+import eu.kanade.tachiyomi.util.system.findActivity
 import `is`.xyz.mpv.BaseMPVView
 import `is`.xyz.mpv.KeyMapping
 import `is`.xyz.mpv.MPVLib
@@ -54,6 +58,7 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
 
     var isExiting = false
     var initialized = false
+    private var lastAdaptiveCheckTime = 0L
 
     private fun getPropertyInt(property: String): Int? {
         if (!initialized) return null
@@ -80,21 +85,28 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
 
     var timePos: Int?
         get() = getPropertyInt("time-pos")
-        set(position) = MPVLib.setPropertyInt("time-pos", position!!)
+        set(position) {
+            if (initialized) MPVLib.setPropertyInt("time-pos", position!!)
+        }
 
     var paused: Boolean?
         get() = getPropertyBoolean("pause")
-        set(paused) = MPVLib.setPropertyBoolean("pause", paused!!)
+        set(paused) {
+            if (initialized) MPVLib.setPropertyBoolean("pause", paused!!)
+        }
 
     val hwdecActive: String
         get() = getPropertyString("hwdec-current") ?: "no"
 
+    val coreIdle: Boolean?
+        get() = getPropertyBoolean("core-idle")
+
+    val pausedForCache: Boolean?
+        get() = getPropertyBoolean("paused-for-cache")
+
     val videoH: Int?
         get() = getPropertyInt("video-params/h")
 
-    /**
-     * Returns the video aspect ratio. Rotation is taken into account.
-     */
     fun getVideoOutAspect(): Double? {
         return getPropertyDouble("video-params/aspect")?.let {
             if (it < 0.001) return 0.0
@@ -121,122 +133,159 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
     var secondarySid: Int by TrackDelegate("secondary-sid")
     var aid: Int by TrackDelegate("aid")
 
+    private var currentMaxBytes = 192 * 1024 * 1024L
+    private var currentMaxBackBytes = 64 * 1024 * 1024L
+
+    fun applyPlaybackStrategy() {
+        val performanceProfile = decoderPreferences.performanceProfile().get()
+        val tier = when (performanceProfile) {
+            PlayerEfficiency.MaxPerformance -> DeviceTierManager.Tier.HIGH
+            PlayerEfficiency.Balanced -> DeviceTierManager.Tier.MID
+            PlayerEfficiency.PowerSaver -> DeviceTierManager.Tier.LOW
+            else -> DeviceTierManager.getTier(context)
+        }
+
+        val (maxMb, maxBackMb, readahead) = when (tier) {
+            DeviceTierManager.Tier.LOW -> Triple(64, 32, 60)
+            DeviceTierManager.Tier.MID -> Triple(128, 64, 120)
+            DeviceTierManager.Tier.HIGH -> {
+                MPVLib.setOptionString("hwdec-extra-frames", "24")
+                Triple(192, 128, 180)
+            }
+        }
+
+        currentMaxBytes = maxMb * 1024 * 1024L
+        currentMaxBackBytes = maxBackMb * 1024 * 1024L
+
+        MPVLib.setOptionString("demuxer-readahead-secs", "$readahead")
+        MPVLib.setOptionString("demuxer-max-bytes", "$currentMaxBytes")
+        MPVLib.setOptionString("demuxer-max-back-bytes", "$currentMaxBackBytes")
+    }
+
+    fun restoreCache() {
+        MPVLib.setPropertyString("demuxer-max-bytes", "$currentMaxBytes")
+        MPVLib.setPropertyString("demuxer-max-back-bytes", "$currentMaxBackBytes")
+    }
+
+    fun shrinkCache() {
+        val shrinkBytes = 64 * 1024 * 1024L
+        MPVLib.setPropertyString("demuxer-max-bytes", "$shrinkBytes")
+        MPVLib.setPropertyString("demuxer-max-back-bytes", "$shrinkBytes")
+    }
+
     override fun initOptions(vo: String) {
         initialized = true
-        val useAnime4K = decoderPreferences.enableAnime4K().get()
-        // Anime4K is incompatible with gpu-next
-        setVo(if (decoderPreferences.gpuNext().get() && !useAnime4K) "gpu-next" else "gpu")
+        // 100% GITHUB ANIKKU ARCHITECTURE (Target: 2.8ms Single Pass)
+        setVo(if (decoderPreferences.gpuNext().get()) "gpu-next" else "gpu")
         
         MPVLib.setPropertyBoolean("pause", true)
         MPVLib.setOptionString("profile", "fast")
+        MPVLib.setOptionString("hwdec", if (decoderPreferences.tryHWDecoding().get()) "auto" else "no")
         
-        // Use optimized hwdec string from mpvEx for better fallback
-        val hwdec = if (decoderPreferences.tryHWDecoding().get()) {
-            val requiresCopyMode = 
-                decoderPreferences.sharpenFilter().get() > 0 ||
-                decoderPreferences.blurFilter().get() > 0 ||
-                decoderPreferences.videoDebanding().get() == Debanding.CPU ||
-                decoderPreferences.saturationFilter().get() != 0 ||
-                decoderPreferences.hueFilter().get() != 0 ||
-                decoderPreferences.smoothMotion().get()
+        // Gated Defaults with HQ toggle
+        val isHighQuality = decoderPreferences.highQualityScaling().get()
+        val scaler = if (isHighQuality) "spline36" else "bilinear"
+        MPVLib.setOptionString("scale", scaler)
+        MPVLib.setOptionString("cscale", scaler)
+        MPVLib.setOptionString("dscale", scaler)
+        MPVLib.setOptionString("dither", if (isHighQuality) "fruit" else "no")
 
-            if (requiresCopyMode || decoderPreferences.forceMediaCodecCopy().get()) {
-                "mediacodec-copy"
-            } else {
-                "mediacodec,mediacodec-copy,no"
-            }
-        } else {
-            "no"
+        when (decoderPreferences.videoDebanding().get()) {
+            Debanding.None -> {}
+            Debanding.CPU -> MPVLib.setOptionString("vf", "gradfun=radius=12")
+            Debanding.GPU -> MPVLib.setOptionString("deband", "yes")
         }
-        MPVLib.setOptionString("hwdec", hwdec)
-        MPVLib.setOptionString("hwdec-codecs", "all")
-        
-        val smoothMotionEnabled = decoderPreferences.smoothMotion().get()
-        // Use audio sync by default for better performance on Android
-        MPVLib.setOptionString("video-sync", "audio")
 
-        // Force detect refresh rate
-        val refreshRate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val smoothMotionEnabled = decoderPreferences.smoothMotion().get()
+        val displayRefreshRate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             context.display?.refreshRate ?: 60f
         } else {
             60f
         }
-        MPVLib.setOptionString("display-fps", refreshRate.toString())
-        MPVLib.setOptionString("override-display-fps", refreshRate.toString())
-
-        if (decoderPreferences.highQualityScaling().get()) {
-            MPVLib.setOptionString("scale", "ewa_lanczossharp")
-            MPVLib.setOptionString("cscale", "mitchell")
-            MPVLib.setOptionString("dscale", "mitchell")
-        }
 
         if (smoothMotionEnabled) {
-            // Interpolation requires display-resample
+            val interpolationFPSLimit = decoderPreferences.interpolationFPSLimit().get()
+            val targetFPS = if (interpolationFPSLimit > 0 && interpolationFPSLimit < displayRefreshRate) {
+                context.findActivity()?.window?.let { window ->
+                    val params = window.attributes
+                    params.preferredRefreshRate = interpolationFPSLimit.toFloat()
+                    window.attributes = params
+                }
+                interpolationFPSLimit.toFloat()
+            } else {
+                displayRefreshRate
+            }
+            MPVLib.setOptionString("display-fps", targetFPS.toString())
+            MPVLib.setOptionString("override-display-fps", targetFPS.toString())
             MPVLib.setOptionString("video-sync", "display-resample")
             MPVLib.setOptionString("interpolation", "yes")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                holder.surface?.let {
+                    if (it.isValid) {
+                        it.setFrameRate(targetFPS, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+                    } else {
+                        holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                            override fun surfaceCreated(h: android.view.SurfaceHolder) {
+                                h.removeCallback(this)
+                                if (h.surface?.isValid == true) {
+                                    h.surface.setFrameRate(targetFPS, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+                                }
+                            }
+
+                            override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, hi: Int) {}
+                            override fun surfaceDestroyed(h: android.view.SurfaceHolder) {}
+                        })
+                    }
+                }
+            }
             val mode = decoderPreferences.interpolationMode().get()
             MPVLib.setOptionString("tscale", mode.value)
+        } else {
+            MPVLib.setOptionString("video-sync", "audio")
         }
 
-        // Initialize Debanding
-        when (val mode = decoderPreferences.videoDebanding().get()) {
-            Debanding.None -> MPVLib.setOptionString("deband", "no")
-            Debanding.CPU -> {
-                // Handled in buildVFChain via gradfun
-            }
-            Debanding.GPU -> {
-                MPVLib.setOptionString("deband", "yes")
-                MPVLib.setOptionString("deband-iterations", decoderPreferences.debandFilter().get().toString())
-                MPVLib.setOptionString("deband-threshold", decoderPreferences.debandThreshold().get().toString())
-                MPVLib.setOptionString("deband-range", decoderPreferences.debandRange().get().toString())
-                MPVLib.setOptionString("deband-grain", decoderPreferences.grainFilter().get().toString())
-            }
+        // Apply filters directly to avoid helper-function overhead
+        if (decoderPreferences.useYUV420P().get()) {
+            MPVLib.setOptionString("vf", "format=yuv420p")
         }
 
-        val vfChain = buildVFChain(decoderPreferences)
-        if (vfChain.isNotEmpty()) {
-            MPVLib.setOptionString("vf", vfChain)
+        if (decoderPreferences.enableAnime4K().get()) {
+            anime4kManager.initialize()
+            applyAnime4K(decoderPreferences, anime4kManager, isInit = true)
         }
-
-        anime4kManager.initialize()
-        applyAnime4K(decoderPreferences, anime4kManager, isInit = true)
 
         MPVLib.setOptionString("msg-level", "all=" + if (networkPreferences.verboseLogging().get()) "v" else "warn")
-
-        MPVLib.setPropertyBoolean("keep-open", true)
         MPVLib.setPropertyBoolean("input-default-bindings", true)
-
-        MPVLib.setOptionString("tls-verify", "yes")
-        MPVLib.setOptionString("tls-ca-file", "${context.filesDir.path}/cacert.pem")
-
-        // Network optimizations
-        MPVLib.setOptionString("http-proxy", "")
-        MPVLib.setOptionString("user-agent", networkHelper.defaultUserAgentProvider())
+        MPVLib.setOptionString("keep-open", "yes")
+        MPVLib.setOptionString("ytdl", "no")
         MPVLib.setOptionString("cookies", "yes")
-        MPVLib.setOptionString("cache-on-disk", "no")
+        MPVLib.setOptionString("cache", "yes")
+        MPVLib.setOptionString("demuxer-thread", "yes")
 
-        // Limit demuxer cache since the defaults are too high for mobile devices
-        // Increased for smoother seeking/skipping
-        val cacheMegs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) 128 else 64
+        val cacheMegs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) 64 else 32
         MPVLib.setOptionString("demuxer-max-bytes", "${cacheMegs * 1024 * 1024}")
         MPVLib.setOptionString("demuxer-max-back-bytes", "${cacheMegs * 1024 * 1024}")
+
+        applyPlaybackStrategy()
+        
         MPVLib.setOptionString("hr-seek", "default")
-        MPVLib.setOptionString("hr-seek-framedrop", "yes")
-        //
+        MPVLib.setOptionString("sub-auto", "fuzzy")
+        
         val screenshotDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
         screenshotDir.mkdirs()
         MPVLib.setOptionString("screenshot-directory", screenshotDir.path)
 
+        // Only apply non-zero filters
         VideoFilters.entries.forEach {
-            if (!it.mpvProperty.startsWith("vf_")) {
-                MPVLib.setOptionString(it.mpvProperty, it.preference(decoderPreferences).get().toString())
+            val value = it.preference(decoderPreferences).get()
+            if (value != 0 && !it.mpvProperty.startsWith("vf_")) {
+                MPVLib.setOptionString(it.mpvProperty, value.toString())
             }
         }
 
         MPVLib.setOptionString("speed", playerPreferences.playerSpeed().get().toString())
-        // workaround for <https://github.com/mpv-player/mpv/issues/14651>
         MPVLib.setOptionString("vd-lavc-film-grain", "cpu")
-
+        
         setupSubtitlesOptions()
         setupAudioOptions()
     }
@@ -251,79 +300,55 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
                 MPVLib.command(arrayOf("script-binding", "stats/display-stats-toggle"))
                 MPVLib.command(arrayOf("script-binding", "stats/display-page-$it"))
             } else if (it == 6 || it == 0) {
-                // Explicitly ensure internal stats are OFF for Page 6 or Off mode
-                // We use a dummy command to ensure the toggle state is predictable
                 MPVLib.setPropertyString("user-data/stats/display-page", "0")
             }
         }
     }
 
     fun onKey(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_MULTIPLE || KeyEvent.isModifierKey(event.keyCode)) {
-            return false
-        }
-
+        if (event.action == KeyEvent.ACTION_MULTIPLE || KeyEvent.isModifierKey(event.keyCode)) return false
         var mapped = KeyMapping.map.get(event.keyCode)
         if (mapped == null) {
-            // Fallback to produced glyph
-            if (!event.isPrintingKey) {
-                if (event.repeatCount == 0) {
-                    logcat(LogPriority.DEBUG) { "Unmapped non-printable key ${event.keyCode}" }
-                }
-                return false
-            }
-
+            if (!event.isPrintingKey) return false
             val ch = event.unicodeChar
-            if (ch.and(KeyCharacterMap.COMBINING_ACCENT) != 0) {
-                return false // dead key
-            }
+            if (ch.and(KeyCharacterMap.COMBINING_ACCENT) != 0) return false
             mapped = ch.toChar().toString()
         }
-
-        if (event.repeatCount > 0) {
-            return true // eat event but ignore it, mpv has its own key repeat
-        }
-
+        if (event.repeatCount > 0) return true
         val mod: MutableList<String> = mutableListOf()
         event.isShiftPressed && mod.add("shift")
         event.isCtrlPressed && mod.add("ctrl")
         event.isAltPressed && mod.add("alt")
         event.isMetaPressed && mod.add("meta")
-
         val action = if (event.action == KeyEvent.ACTION_DOWN) "keydown" else "keyup"
         mod.add(mapped)
         MPVLib.command(arrayOf(action, mod.joinToString("+")))
-
         return true
     }
 
-    override fun onDetachedFromWindow() {
-        initialized = false
-        super.onDetachedFromWindow()
-    }
-
     private val observedProps = mapOf(
-        "chapter" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
         "chapter-list" to MPVLib.mpvFormat.MPV_FORMAT_NONE,
         "track-list" to MPVLib.mpvFormat.MPV_FORMAT_NONE,
-
         "time-pos" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
         "demuxer-cache-time" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
         "duration" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
         "volume" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
         "volume-max" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-
         "sid" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
         "secondary-sid" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
         "aid" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
         "speed" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
+        "video-zoom" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
+        "video-pan-x" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
+        "video-pan-y" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
         "video-params/aspect" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
         "pause" to MPVLib.mpvFormat.MPV_FORMAT_FLAG,
         "paused-for-cache" to MPVLib.mpvFormat.MPV_FORMAT_FLAG,
+        "core-idle" to MPVLib.mpvFormat.MPV_FORMAT_FLAG,
         "seeking" to MPVLib.mpvFormat.MPV_FORMAT_FLAG,
         "eof-reached" to MPVLib.mpvFormat.MPV_FORMAT_FLAG,
         "hwdec-current" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-
+        "hwdec" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
         "user-data/current-anime/intro-length" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
         "user-data/aniyomi/show_text" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
         "user-data/aniyomi/toggle_ui" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
@@ -339,32 +364,6 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         "user-data/aniyomi/seek_by_with_text" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
         "user-data/aniyomi/seek_to_with_text" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
         "user-data/aniyomi/launch_int_picker" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-
-        "video-sync" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-        "tscale" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-        "video-codec" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-        "video-params/pixelformat" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-        "video-params/colorlevels" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-        "video-params/primaries" to MPVLib.mpvFormat.MPV_FORMAT_STRING,
-
-        "video-params/w" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "video-params/h" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "video-out-params/w" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "video-out-params/h" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "dwidth" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "dheight" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "video-bitrate" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "vo-delayed-frame-count" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-        "vo-passes" to MPVLib.mpvFormat.MPV_FORMAT_INT64,
-
-        "estimated-vf-fps" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
-        "video-params/fps" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
-        "fps" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
-        "video-out-params/fps" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
-        "container-fps" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
-        "display-fps" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
-        "estimated-display-fps" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
-        "mistime" to MPVLib.mpvFormat.MPV_FORMAT_DOUBLE,
     )
 
     private fun setupAudioOptions() {
@@ -375,13 +374,10 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
     }
 
     private fun setupSubtitlesOptions() {
+        MPVLib.setOptionString("slang", subtitlePreferences.preferredSubLanguages().get())
         MPVLib.setOptionString("sub-delay", (subtitlePreferences.subtitlesDelay().get() / 1000.0).toString())
         MPVLib.setOptionString("sub-speed", subtitlePreferences.subtitlesSpeed().get().toString())
-        MPVLib.setOptionString(
-            "secondary-sub-delay",
-            (subtitlePreferences.subtitlesSecondaryDelay().get() / 1000.0).toString(),
-        )
-
+        MPVLib.setOptionString("secondary-sub-delay", (subtitlePreferences.subtitlesSecondaryDelay().get() / 1000.0).toString())
         MPVLib.setOptionString("sub-font", subtitlePreferences.subtitleFont().get())
         if (subtitlePreferences.overrideSubsASS().get()) {
             MPVLib.setOptionString("sub-ass-override", "force")
@@ -392,15 +388,27 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         MPVLib.setOptionString("sub-italic", if (subtitlePreferences.italicSubtitles().get()) "yes" else "no")
         MPVLib.setOptionString("sub-justify", subtitlePreferences.subtitleJustification().get().value)
         MPVLib.setOptionString("sub-color", subtitlePreferences.textColorSubtitles().get().toColorHexString())
-        MPVLib.setOptionString(
-            "sub-back-color",
-            subtitlePreferences.backgroundColorSubtitles().get().toColorHexString(),
-        )
+        MPVLib.setOptionString("sub-back-color", subtitlePreferences.backgroundColorSubtitles().get().toColorHexString())
         MPVLib.setOptionString("sub-border-color", subtitlePreferences.borderColorSubtitles().get().toColorHexString())
         MPVLib.setOptionString("sub-border-size", subtitlePreferences.subtitleBorderSize().get().toString())
         MPVLib.setOptionString("sub-border-style", subtitlePreferences.borderStyleSubtitles().get().value)
         MPVLib.setOptionString("sub-shadow-offset", subtitlePreferences.shadowOffsetSubtitles().get().toString())
         MPVLib.setOptionString("sub-pos", subtitlePreferences.subtitlePos().get().toString())
         MPVLib.setOptionString("sub-scale", subtitlePreferences.subtitleFontScale().get().toString())
+    }
+
+    fun checkAdaptiveScaling(delayedFrames: Long) {
+        if (!decoderPreferences.adaptiveShaderScaling().get() || !decoderPreferences.enableAnime4K().get() || PlayerStats.isAdaptiveDowngraded.value) return
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastAdaptiveCheckTime < 5000) return
+        lastAdaptiveCheckTime = currentTime
+        if (delayedFrames > 10 && decoderPreferences.anime4kQuality().get() == "HIGH") {
+            decoderPreferences.anime4kQuality().set("BALANCED")
+            applyAnime4K(decoderPreferences, anime4kManager)
+            PlayerStats.isAdaptiveDowngraded.value = true
+            (context as? PlayerActivity)?.runOnUiThread {
+                (context as? PlayerActivity)?.showToast("Performance: Anime4K downgraded to Balanced")
+            }
+        }
     }
 }

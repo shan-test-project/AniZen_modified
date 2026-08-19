@@ -6,6 +6,7 @@ import tachiyomi.domain.anime.repository.AnimeRepository
 
 class SetAnimeEpisodeFlags(
     private val animeRepository: AnimeRepository,
+    private val getFavorites: GetFavorites,
 ) {
 
     suspend fun awaitSetDownloadedFilter(manga: Anime, flag: Long): Boolean {
@@ -55,6 +56,43 @@ class SetAnimeEpisodeFlags(
         )
     }
 
+    suspend fun awaitSetShowPreviews(manga: Anime, flag: Long): Boolean {
+        return animeRepository.update(
+            AnimeUpdate(
+                id = manga.id,
+                episodeFlags = manga.episodeFlags.setFlag(flag, Anime.EPISODE_PREVIEWS_MASK),
+            ),
+        )
+    }
+
+    suspend fun awaitSetShowSummaries(manga: Anime, flag: Long): Boolean {
+        return animeRepository.update(
+            AnimeUpdate(
+                id = manga.id,
+                episodeFlags = manga.episodeFlags.setFlag(flag, Anime.EPISODE_SUMMARIES_MASK),
+            ),
+        )
+    }
+
+    suspend fun awaitSetSeasonGrouping(manga: Anime, enabled: Boolean): Boolean {
+        val flag = if (enabled) {
+            // Default to Tabs if enabled via this simple toggle (legacy support)
+            Anime.EPISODE_SEASON_GROUP_TABS
+        } else {
+            Anime.EPISODE_SEASON_GROUP_OFF
+        }
+        return awaitSetSeasonGroupingRaw(manga, flag)
+    }
+
+    suspend fun awaitSetSeasonGroupingRaw(manga: Anime, flag: Long): Boolean {
+        return animeRepository.update(
+            AnimeUpdate(
+                id = manga.id,
+                episodeFlags = manga.episodeFlags.setFlag(flag, Anime.EPISODE_SEASON_GROUP_MASK),
+            ),
+        )
+    }
+
     suspend fun awaitSetSortingModeOrFlipOrder(manga: Anime, flag: Long): Boolean {
         val newFlags = manga.episodeFlags.let {
             if (manga.sorting == flag) {
@@ -91,6 +129,9 @@ class SetAnimeEpisodeFlags(
         sortingMode: Long,
         sortingDirection: Long,
         displayMode: Long,
+        seasonGrouping: Long,
+        showPreviews: Long,
+        showSummaries: Long,
     ): Boolean {
         return animeRepository.update(
             AnimeUpdate(
@@ -103,9 +144,44 @@ class SetAnimeEpisodeFlags(
                     // <-- AM (FILLERMARK)
                     .setFlag(sortingMode, Anime.EPISODE_SORTING_MASK)
                     .setFlag(sortingDirection, Anime.EPISODE_SORT_DIR_MASK)
-                    .setFlag(displayMode, Anime.EPISODE_DISPLAY_MASK),
+                    .setFlag(displayMode, Anime.EPISODE_DISPLAY_MASK)
+                    .setFlag(seasonGrouping, Anime.EPISODE_SEASON_GROUP_MASK)
+                    .setFlag(showPreviews, Anime.EPISODE_PREVIEWS_MASK)
+                    .setFlag(showSummaries, Anime.EPISODE_SUMMARIES_MASK),
             ),
         )
+    }
+
+    suspend fun awaitSetAllAnimeFlags(
+        unseenFilter: Long,
+        downloadedFilter: Long,
+        bookmarkedFilter: Long,
+        fillermarkedFilter: Long,
+        sortingMode: Long,
+        displayMode: Long,
+        sortingDirection: Long,
+        seasonGrouping: Long,
+        showPreviews: Long,
+        showSummaries: Long,
+    ) {
+        val updates = getFavorites.await().map { anime ->
+            AnimeUpdate(
+                id = anime.id,
+                episodeFlags = 0L.setFlag(unseenFilter, Anime.EPISODE_UNSEEN_MASK)
+                    .setFlag(downloadedFilter, Anime.EPISODE_DOWNLOADED_MASK)
+                    .setFlag(bookmarkedFilter, Anime.EPISODE_BOOKMARKED_MASK)
+                    // AM (FILLERMARK) -->
+                    .setFlag(fillermarkedFilter, Anime.EPISODE_FILLERMARKED_MASK)
+                    // <-- AM (FILLERMARK)
+                    .setFlag(sortingMode, Anime.EPISODE_SORTING_MASK)
+                    .setFlag(sortingDirection, Anime.EPISODE_SORT_DIR_MASK)
+                    .setFlag(displayMode, Anime.EPISODE_DISPLAY_MASK)
+                    .setFlag(seasonGrouping, Anime.EPISODE_SEASON_GROUP_MASK)
+                    .setFlag(showPreviews, Anime.EPISODE_PREVIEWS_MASK)
+                    .setFlag(showSummaries, Anime.EPISODE_SUMMARIES_MASK),
+            )
+        }
+        animeRepository.updateAll(updates)
     }
 
     private fun Long.setFlag(flag: Long, mask: Long): Long {

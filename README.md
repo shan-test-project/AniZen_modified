@@ -1,128 +1,155 @@
-# 🌸 AniZen
+<div align="center">
 
-Hey there, anime friend! 👋
+<img src="./.github/assets/icon.png" alt="AniZen Logo" width="100"/>
 
-AniZen is more than just an app—it's a cozy corner of the internet built for anime lovers who want to explore, track, and share their passion without the rush. Whether you're here to discover hidden gems, keep track of your watchlist, or just vibe with fellow fans, you're welcome.
+# AniZen
 
-**✨ Why AniZen exists:**  
-To create a calm, kind, and open space where anime brings people together—not just code.
+### A personal anime & movie client for Android.
+#### AniZen × Miyomi
+*A custom media player built with Jetpack Compose, designed for fluid interactions, smart offline playback, and experimental integrations.*
 
-**🤝 Join us:**  
-We're a small team with big love for the community. If you'd like to help make AniZen better (or just hang out), here's where to find us:
-
-- [Join our Discord](https://discord.gg/8eQBJuWAY) – say hi!  
-- [Read our Contributing Guide](CONTRIBUTING.md) – we'd love your help  
-- [Check our Code of Conduct](CODE_OF_CONDUCT.md) – kindness first  
-
-Thanks to the **181 amazing contributors** who've already made this journey beautiful. You rock. 🚀
+[![Discord](https://img.shields.io/discord/1242381704459452488?label=Discord&labelColor=6A7EC2&color=7389D8&logo=discord&logoColor=FFFFFF&style=flat-square)](https://discord.gg/J2wmZqEJnS)
+[![Preview Build](https://img.shields.io/github/actions/workflow/status/salmanbappi/AniZen/preview.yml?branch=preview&label=Preview%20Build&style=flat-square)](https://github.com/salmanbappi/AniZen/actions/workflows/preview.yml)
+[![Release](https://img.shields.io/github/v/release/salmanbappi/AniZen?style=flat-square)](https://github.com/salmanbappi/AniZen/releases)
+[![Downloads](https://img.shields.io/github/downloads/salmanbappi/AniZen/total?style=flat-square)](https://github.com/salmanbappi/AniZen/releases)
+[![Views](https://komarev.com/ghpvc/?username=salmanbappi&repo=AniZen&style=flat-square&color=0877d2)](https://github.com/salmanbappi/AniZen)
+[![License](https://img.shields.io/github/license/salmanbappi/AniZen?label=License&color=0877d2&style=flat-square)](/LICENSE)
+</div>
 
 ---
 
-# AniZen – Your Calm Anime Companion
+## 📖 About AniZen
 
-![AniZen banner](link-to-banner-if-available)
+AniZen is a solo-built passion project that started on the foundation of Aniyomi and Anikku. It was created to explore how far an Android media client can go when designed with modern programming principles, deep player optimizations, and a focus on fluidity. 
 
-AniZen is an open-source Android app (built with Kotlin) that helps you keep track of your anime journey, discover new series, and connect with a community that shares your love for anime. But more than that, it's a project built on **conscious communication** – we believe that how we talk to each other matters as much as the code we write.
+It aims to offer a premium, responsive, and completely personalized viewing space while remaining lightweight and respectful of hardware resources.
 
-## 🌱 Our Philosophy
+---
 
-We're guided by a simple idea: **connection over perfection**. Whether you're a developer, designer, translator, or just someone who loves anime, you have a place here. We're not here to impress – we're here to build something useful together, with respect, honesty, and a little bit of zen.
+## Features
 
-This project follows the [Conscious Communication Framework](CONSCIOUS_COMMUNICATION.md) – a set of tools to make every interaction (even on GitHub) more human.
+<div align="left">
 
-## 🎨 Features
+### Features include:
 
-- **Track your anime** – Keep a list of what you've watched, are watching, or plan to watch.
-- **Discover new series** – Get recommendations based on your taste.
-- **Community-driven** – Join discussions, share reviews, and connect with fans.
-- **Clean & calm design** – No clutter, just the info you need.
-- **Open source** – Built in the open, by the community, for the community.
+* **AniZen**:
+  * **🎬 Media Player & Video Engine**:
+    * `Anime4K Neural Shaders` built-in upscaling quality levels (Fast, Balanced, High) and multiple processing modes (A, B, C, A+, B+, C+) for real-time video upscaling.
+    * `Motion Interpolation` temporal interpolation scaling (oversample, mitchell, catmull-rom) generating smooth frames matching the display refresh rate (up to 120fps/144fps).
+    * `MPVFX Filter Suite` card-based interface in the player for Debanding, Video Adjustments (Brightness, Saturation, Contrast, Gamma, Hue, Sharpen), and integrated Anime4K controls.
+    * `Dynamic Mediacodec Switching` automatic fallback to software decoding if active filters exceed hardware capability.
+    * `Adaptive Shader Scaling` automatically downgrades Anime4K quality if high frame drops/delayed frames are detected during playback to keep rendering smooth.
+    * `AniSkip Integration` skippable intros and Netflix-style skip button based on the online AniSkip database.
+    * `Filler Episode Skipping` automatically skips filler episodes based on tracking information.
+    * `Native Picture-in-Picture (PiP)` background playback support with custom controls.
+    * `Advanced Config & Script Editor` in-app code editor for `mpv.conf` and `input.conf` files, and support for running custom scripts.
+    * `Pinch-to-Zoom Gesture` pinch gestures and precise scale control (up to 3x) with dedicated zoom sheet adjustments during playback.
+    * `On-Demand Subtitles` loading of external/custom local subtitle files directly into the active player session via URI.
+    * `Default Stream Memory` automatically remembers preferred stream hoster and quality per anime to fast-forward selection for subsequent episodes.
+    * `Fluid Playback Gestures` long-press to activate jitter-free 2x speed with release animation, and horizontal slide speed adjustments.
+    * `Volume Boosting & Pitch Correction` volume boosting up to 200% with pitch correction to preserve original voices at high speeds.
+    * `Custom Aspect Ratios & Sleep Timer` define custom aspect ratio values and schedule playback sleep timers.
+    * `Custom Player Layout` fully configurable action buttons and player interface layout reordering.
+  * **📥 Resilient Downloader & Storage**:
+    * `1DM-Style Downloader` multi-threaded chunked download engine utilizing byte-range splitting.
+    * `Resilient Part-File Recovery` per-part file size verification, automatic 5x retry logic with exponential backoff, and robust `BufferPool` recycling.
+    * `External Downloader Handoff` seamless delegation of downloads to external managers (like 1DM or ADM), automatically passing custom stream headers, filenames, and download directories.
+    * `Native HLS & DASH Engines` multi-threaded HLS segment downloader with on-the-fly AES-128 decryption, variant playlist resolution, and native DASH muxing via FFmpeg with duration-based progress estimation.
+    * `Pro-Active Stream Pre-fetching` background stream URL resolution for queued downloads, minimizing delay between transitions.
+    * `Pre-Flight Storage Protection` automatic space allocation checks (maintaining a 200MB safety buffer, or 1.5x for FFmpeg operations) before download execution to prevent system instability.
+    * `Early Soft Subtitles Retrieval` downloads and packages VTT, ASS, and SRT subtitle tracks automatically and non-fatally alongside the video file.
+    * `Atomic Directory Assembly` downloads are isolated in a sandbox cache using temporary folder renames (`_tmp`) to prevent partial downloads from cluttering public storage.
+    * `Preload Next Episode` pre-resolves stream links and hoster lists in the background with network-aware throttling to prevent playback stutter.
+  * **📰 Feed & Personalization**:
+    * `Category-Styled Feeds` feed homepage organizes saved searches and popular content under custom category sections with drag-and-drop ordering.
+    * `Saved Search Feeds` pins specific keyword queries and filter configurations directly as auto-updating feed rows.
+    * `Unified Feed Tab` view the latest entries or saved searches from multiple sources simultaneously.
+    * `Custom Cover Art` set custom covers using local files or web URLs.
+    * `Auto theme color` based on each entry's cover for entry View.
+    * `Dynamic Player Theme` automatically themes the media player interface colors based on the active cover art.
+    * `App custom theme` with `22 Color palettes` for endless customization.
+    * `Panorama cover` showing wide cover in full.
+    * `Library Folders` group specific anime into custom collapsible sub-folders inside library categories.
+    * `UI Container Styles` choose card-like container layouts per-tab (Library, Updates, History, Browse, Details, Settings).
+    * `Haze Glassmorphism` toggleable glass-blur styling effects for top and bottom navigation bars.
+  * **📊 Statistics & Maintenance**:
+    * `Behavioral Watch Statistics` tracks rich watch habits (weekly heatmaps, genre affinity, status breakdowns, rolling 30-day feed activity logs, preferred viewing times, and top-viewed titles) and infrastructure metrics (throughput distribution, latency matrices, and topology breakdowns).
+    * `Extension Health Monitoring` live reports detailing extension latency, online node status, and connections metrics.
+    * `AI Diagnostics & Assistant` conversational troubleshooting assistant capable of digesting exception trace logs and library context.
+    * `Unified Rating Distribution` calculates and displays score distributions and mean ratings by combining local ratings and synced tracker data.
+    * `Extension Repository Source Mapping` resolves and tracks the specific GitHub repository (owner/repo) from which extensions are installed.
+    * `Diagnostics Report Export` formats and exports extension health statistics, resolve statuses, and logs directly to the clipboard.
+    * `Adaptive Navigation` suggests layout presets (Default, Minimal, Power) dynamically based on network connectivity and time-of-day.
 
-*(Screenshots or GIFs would go here – they make a huge difference!)*
+</div>
+
+---
+
+## 🛠️ Technical Architecture
+
+AniZen follows **Clean Architecture** principles to separate business logic, UI, and data handling into a modular structure:
+
+```
+app                   # Entry point, dependency injection configuration
+├── core              # Shared helpers, common extensions, and base utilities
+├── data              # Repositories, database (SQLDelight), and networking (OkHttp)
+├── domain            # Core business logic, use cases, and domain models
+├── presentation-core # Reusable UI components, themes, and design tokens (Compose)
+├── source-api        # Extension API interfaces and definitions
+└── source-local      # Local storage and media indexers
+```
+
+### Technical Stack & Decisions
+*   **Development Platform:** 100% Kotlin with Jetpack Compose for declarative UI.
+*   **Concurrency:** Kotlin Coroutines & Flow for asynchronous tasks and state streaming.
+*   **Database:** SQLDelight for compile-time safe SQL queries.
+*   **Core Shaders:** High-quality `ewa_lanczossharp` scaling for sharpest anime lines.
+*   **Scrolling Performance:** Implements `Precision.INEXACT` cover scaling to delegate image processing to the GPU, removing micro-stutter and keeping scrolling fluid on 120/144Hz displays.
+
+---
 
 ## 🚀 Getting Started
 
-Ready to give AniZen a try? Here's how:
+### For Users
+1. Head over to the [Releases](https://github.com/salmanbappi/AniZen/releases) tab.
+2. Download the latest `arm64-v8a` release APK.
+3. Install the APK (requires enabling *Install from Unknown Sources*).
+4. Installs under package ID `app.anizen` — runs side-by-side with official Anikku without issues.
 
-1. **Download the app** from the [Releases page](https://github.com/salmanbappi/AniZen/releases) (Android APK).
-2. **Explore** – Add your first anime, check out the trending section, or just wander.
-3. **Join the conversation** on [Discord](https://discord.gg/8eQBJuWAY) – we'd love to hear your thoughts!
-
-If you're a developer and want to run the project locally, check out the [Development Guide](CONTRIBUTING.md#development).
-
-## 🤝 How to Contribute
-
-We welcome contributions of all kinds – code, design, ideas, translations, bug reports, or just a kind word. No contribution is too small.
-
-Here's how you can help:
-
-- **Report a bug** – Open an [issue](https://github.com/salmanbappi/AniZen/issues) and tell us what's wrong.
-- **Suggest a feature** – We'd love to hear your ideas.
-- **Submit code** – Check out our [Contributing Guide](CONTRIBUTING.md) for setup and guidelines.
-- **Help with translations** – Make AniZen accessible to more people.
-- **Spread the word** – Star the repo, share it with friends, or write about it.
-
-But most importantly: **be kind**. We have a [Code of Conduct](CODE_OF_CONDUCT.md) based on empathy and respect. Please read it before participating.
-
-## 🧭 Roadmap (Where We're Headed)
-
-We're dreaming big, but taking small steps. Here's what's on the horizon:
-
-- **Better recommendations** – Using community data to suggest anime you'll love.
-- **User profiles** – Share your watchlist and reviews with friends.
-- **Widgets & notifications** – For when you just can't miss a new episode.
-- **More platforms** – Maybe iOS? Maybe desktop? Let's see!
-
-Want to influence what comes next? Join the discussion on [Discord](https://discord.gg/8eQBJuWAY) or open an issue.
-
-## 💖 Thank You
-
-AniZen wouldn't exist without the love and effort of its community. A huge thank you to:
-
-- **salmanbappi** – for starting this project and trusting us to carry it forward.
-- **All 181 contributors** – you've made this repo a living, breathing thing.
-- **Every user** – you're the reason we do this.
-
-If you've ever opened an issue, submitted a PR, or just said "nice app" – thank you. You're part of the story.
-
-## 📄 License
-
-AniZen is open source under the [MIT License](LICENSE). Feel free to use, modify, and share it – just remember to be cool. 😎
+### For Developers
+Clone the repository and build using Gradle:
+```bash
+git clone https://github.com/salmanbappi/AniZen.git
+cd AniZen
+./gradlew assembleDebug
+```
+Automated preview builds can also be found in the [Actions tab](https://github.com/salmanbappi/AniZen/actions/workflows/preview.yml).
 
 ---
 
-## 🌟 Let's Stay Connected
+## 🤝 Contributing & Support
 
-- [Discord](https://discord.gg/8eQBJuWAY) – the heart of our community.
-- [GitHub Issues](https://github.com/salmanbappi/AniZen/issues) – for bug reports and feature requests.
-- [Twitter / X](https://twitter.com/your-anizen-handle) – if we have one, link it here.
+*   **Bug Reports:** Report issues and attach logs via [GitHub Issues](https://github.com/salmanbappi/AniZen/issues).
+*   **Community:** Join our [Discord Server](https://discord.gg/J2wmZqEJnS) to ask questions, chat, or suggest features.
 
-**Made with ☕ and 🌸 by anime fans, for anime fans.**
+---
 
+## 💖 Credits
 
+AniZen would not be possible without the incredible open-source projects it builds upon:
+*   [Aniyomi](https://github.com/aniyomiorg/aniyomi) & [Anikku](https://github.com/komikku-app/anikku) (Core codebase foundations)
+*   [Anime4K](https://github.com/bloc97/Anime4K) (Real-time shaders)
+*   [mpvEx](https://github.com/marlboro-advance/mpvEx) (MPV integration patterns)
 
+---
 
+## 📄 License
 
+AniZen is open-source software licensed under the [Apache-2.0 License](LICENSE).
 
+---
 
-
-
-
-
-
-
-# Conscious Communication Framework – AniZen Edition
-
-This project is guided by the **Conscious Communication Framework**, a set of 100 tools to make human (and AI) interactions more authentic, kind, and effective. We encourage every contributor to read and apply these principles.
-
-👉 [Read the full framework](link-to-full-framework) (or embed it here)
-
-**Core principles we live by:**
-
-- **Pause before reacting** – Give yourself (and others) space to respond, not just react.
-- **Intent matters** – Ask yourself: “Does this bring us closer or push us apart?”
-- **Humility over arrogance** – We all have blind spots. Let’s learn together.
-- **Responsibility for impact** – Even if unintended, we own the effect of our words.
-- **Connection over perfection** – Mistakes are allowed; repair is encouraged.
-
-We invite you to bring this spirit into every issue, PR, and Discord message. Let’s build not just great code, but a great community.
+<div align="center">
+<sub>AniZen × Miyomi</sub><br>
+<sub>Designed, directed, and built solo. Every detail intentional.</sub>
+</div>

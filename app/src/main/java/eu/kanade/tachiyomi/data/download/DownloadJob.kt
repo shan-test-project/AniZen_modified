@@ -41,10 +41,10 @@ class DownloadJob(context: Context, workerParams: WorkerParameters) : CoroutineW
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val notification = applicationContext.notificationBuilder(Notifications.CHANNEL_DOWNLOADER_PROGRESS) {
             setContentTitle(applicationContext.getString(R.string.download_notifier_downloader_title))
-            setSmallIcon(android.R.drawable.stat_sys_download)
+            setSmallIcon(R.drawable.ic_splash_logo)
         }.build()
         return ForegroundInfo(
-            Notifications.ID_DOWNLOAD_JOB_FOREGROUND,
+            Notifications.ID_DOWNLOAD_EPISODE_PROGRESS,
             notification,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
@@ -59,7 +59,7 @@ class DownloadJob(context: Context, workerParams: WorkerParameters) : CoroutineW
             applicationContext.activeNetworkState(),
             downloadPreferences.downloadOnlyOverWifi().get(),
         )
-        var active = networkCheck && downloadManager.downloaderStart()
+        var active = networkCheck && (downloadManager.downloaderStart() || downloadManager.isRunning)
 
         if (!active) {
             return Result.failure()
@@ -80,7 +80,7 @@ class DownloadJob(context: Context, workerParams: WorkerParameters) : CoroutineW
         // Keep the worker running when needed
         while (active) {
             delay(1000)
-            active = !isStopped && downloadManager.isRunning && networkCheck
+            active = !isStopped && downloadManager.isRunning && (networkCheck || downloadManager.isLocalPhase)
         }
 
         return Result.success()
@@ -89,14 +89,16 @@ class DownloadJob(context: Context, workerParams: WorkerParameters) : CoroutineW
     private fun checkNetworkState(state: NetworkState, requireWifi: Boolean): Boolean {
         return if (state.isOnline) {
             val noWifi = requireWifi && !state.isWifi
-            if (noWifi) {
+            if (noWifi && !downloadManager.isLocalPhase) {
                 downloadManager.downloaderStop(
                     applicationContext.getString(R.string.download_notifier_text_only_wifi),
                 )
             }
             !noWifi
         } else {
-            downloadManager.downloaderStop(applicationContext.getString(R.string.download_notifier_no_network))
+            if (!downloadManager.isLocalPhase) {
+                downloadManager.downloaderStop(applicationContext.getString(R.string.download_notifier_no_network))
+            }
             false
         }
     }
@@ -109,7 +111,7 @@ class DownloadJob(context: Context, workerParams: WorkerParameters) : CoroutineW
                 .addTag(TAG)
                 .build()
             WorkManager.getInstance(context)
-                .enqueueUniqueWork(TAG, ExistingWorkPolicy.REPLACE, request)
+                .enqueueUniqueWork(TAG, ExistingWorkPolicy.KEEP, request)
         }
 
         fun stop(context: Context) {

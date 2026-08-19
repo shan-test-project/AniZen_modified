@@ -17,6 +17,9 @@ import androidx.work.WorkQuery
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import eu.kanade.domain.anime.interactor.UpdateAnime
+import eu.kanade.domain.anime.interactor.SyncSeasonsWithSource
+import eu.kanade.tachiyomi.animesource.model.FetchType
+import tachiyomi.domain.season.interactor.GetAnimeSeasonsById
 import tachiyomi.domain.anime.model.toSAnime
 import eu.kanade.domain.episode.interactor.SyncEpisodesWithSource
 import eu.kanade.domain.sync.SyncPreferences
@@ -70,6 +73,11 @@ import tachiyomi.domain.library.service.LibraryPreferences.Companion.DEVICE_NETW
 import tachiyomi.domain.library.service.LibraryPreferences.Companion.DEVICE_ONLY_ON_WIFI
 import tachiyomi.domain.source.model.SourceNotInstalledException
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.libraryUpdateError.interactor.DeleteLibraryUpdateErrors
+import tachiyomi.domain.libraryUpdateError.interactor.InsertLibraryUpdateErrors
+import tachiyomi.domain.libraryUpdateError.model.LibraryUpdateError
+import tachiyomi.domain.libraryUpdateErrorMessage.interactor.InsertLibraryUpdateErrorMessages
+import tachiyomi.domain.libraryUpdateErrorMessage.model.LibraryUpdateErrorMessage
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
@@ -93,6 +101,11 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private val getAnime: GetAnime = Injekt.get()
     private val updateAnime: UpdateAnime = Injekt.get()
     private val syncEpisodesWithSource: SyncEpisodesWithSource = Injekt.get()
+    private val syncSeasonsWithSource: SyncSeasonsWithSource = Injekt.get()
+    private val getAnimeSeasonsById: GetAnimeSeasonsById = Injekt.get()
+    private val deleteLibraryUpdateErrors: DeleteLibraryUpdateErrors = Injekt.get<DeleteLibraryUpdateErrors>()
+    private val insertLibraryUpdateErrors: InsertLibraryUpdateErrors = Injekt.get<InsertLibraryUpdateErrors>()
+    private val insertLibraryUpdateErrorMessages: InsertLibraryUpdateErrorMessages = Injekt.get<InsertLibraryUpdateErrorMessages>()
     private val getTracks: GetTracks = Injekt.get()
     private val fetchInterval: FetchInterval = Injekt.get()
     private val filterEpisodesForDownload: FilterEpisodesForDownload = Injekt.get()
@@ -105,7 +118,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     override suspend fun doWork(): Result {
         if (tags.contains(WORK_NAME_AUTO)) {
             val preferences = Injekt.get<LibraryPreferences>()
-            val restrictions = preferences.autoUpdateDeviceRestrictions().get()
+            val restrictions = preferences.autoUpdateDeviceRestrictions.get()
             if ((DEVICE_ONLY_ON_WIFI in restrictions) && !context.isConnectedToWifi()) {
                 return Result.failure()
             }
@@ -116,6 +129,8 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             }
         }
 
+        deleteLibraryUpdateErrors.cleanUnrelevantMangaErrors()
+
         try {
             setForeground(getForegroundInfo())
         } catch (e: IllegalStateException) {
@@ -123,6 +138,8 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         }
 
         libraryPreferences.lastUpdatedTimestamp().set(Instant.now().toEpochMilli())
+
+        val showBanner = libraryPreferences.showUpdatingProgressBanner().get()
 
         val categoryId = inputData.getLong(KEY_CATEGORY, -1L)
         // SY -->
@@ -133,7 +150,10 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
 
         return withIOContext {
             try {
-                updateEpisodeList()
+                if (showBanner) {
+                    setProgress(workDataOf("progress" to 0, "title" to context.stringResource(MR.strings.updating_library)))
+                }
+                updateEpisodeList(showBanner)
                 Result.success()
             } catch (e: Exception) {
                 if (e is CancellationException) {
@@ -244,11 +264,34 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             // SY <--
         }
 
-        val restrictions = libraryPreferences.autoUpdateAnimeRestrictions().get()
+        val includeSeasonsGlobal = libraryPreferences.useHierarchicalSeasons().get()
+        
+        val lastToUpdateWithSeasons = listToUpdate.flatMap { libAnime ->
+            when (libAnime.anime.fetchType) {
+                FetchType.Seasons -> {
+                    val list = mutableListOf(libAnime)
+                    
+                    if (includeSeasonsGlobal) {
+                        val seasons = getAnimeSeasonsById.await(libAnime.anime.id)
+                        list.addAll(
+                            seasons
+                                .filter { s ->
+                                    s.anime.fetchType == FetchType.Episodes && !s.anime.favorite
+                                }
+                                .map { it.toLibraryAnime() }
+                        )
+                    }
+                    list
+                }
+                FetchType.Episodes -> listOf(libAnime)
+            }
+        }
+
+        val restrictions = libraryPreferences.autoUpdateAnimeRestrictions.get()
         val skippedUpdates = mutableListOf<Pair<Anime, String?>>()
         val (_, fetchWindowUpperBound) = fetchInterval.getWindow(ZonedDateTime.now())
 
-        animeToUpdate = listToUpdate
+        animeToUpdate = lastToUpdateWithSeasons
             // SY -->
             .distinctBy { it.anime.id }
             // SY <--
@@ -321,7 +364,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
      * @return an observable delivering the progress of each update.
      */
     @Suppress("MagicNumber", "LongMethod")
-    private suspend fun updateEpisodeList() {
+    private suspend fun updateEpisodeList(showBanner: Boolean) {
         val semaphore = Semaphore(5)
         val progressCount = AtomicInteger(0)
         val currentlyUpdatingAnime = CopyOnWriteArrayList<Anime>()
@@ -348,6 +391,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                     currentlyUpdatingAnime,
                                     progressCount,
                                     anime,
+                                    showBanner,
                                 ) {
                                     try {
                                         val newEpisodes = updateAnime(anime, fetchWindow)
@@ -358,6 +402,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                             val episodesToDownload = filterEpisodesForDownload.await(anime, newEpisodes)
 
                                             if (episodesToDownload.isNotEmpty()) {
+                                                downloadEpisodes(anime, episodesToDownload)
                                                 hasDownloads.set(true)
                                             }
 
@@ -367,6 +412,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                             // Convert to the anime that contains new episodes
                                             newUpdates.add(anime to newEpisodes.toTypedArray())
                                         }
+                                        clearErrorFromDB(anime.id)
                                     } catch (e: Throwable) {
                                         val errorMessage = when (e) {
                                             is NoResultsException -> context.stringResource(
@@ -378,6 +424,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                             )
                                             else -> e.message
                                         }
+                                        writeErrorToDB(anime to errorMessage)
                                         failedUpdates.add(anime to errorMessage)
                                     }
                                 }
@@ -392,6 +439,19 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
 
         if (newUpdates.isNotEmpty()) {
             notifier.showUpdateNotifications(newUpdates)
+            
+            // Pre-fetch covers for new updates to make them load instantly in the library
+            coroutineScope {
+                val imageLoader = coil3.SingletonImageLoader.get(context)
+                newUpdates.forEach { (anime, _) ->
+                    val request = coil3.request.ImageRequest.Builder(context)
+                        .data(anime)
+                        .precision(coil3.size.Precision.INEXACT)
+                        .build()
+                    imageLoader.enqueue(request)
+                }
+            }
+
             if (hasDownloads.get()) {
                 downloadManager.startDownloads()
             }
@@ -422,16 +482,20 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         val source = sourceManager.getOrStub(anime.source)
 
         // Update anime metadata if needed
-        if (libraryPreferences.autoUpdateMetadata().get()) {
+        if (libraryPreferences.autoUpdateMetadata.get()) {
             val networkAnime = source.getAnimeDetails(anime.toSAnime())
             updateAnime.awaitUpdateFromSource(anime, networkAnime, manualFetch = false, coverCache)
         }
 
-        val episodes = source.getEpisodeList(anime.toSAnime())
-
-        // Get anime from database to account for if it was removed during the update and
-        // to get latest data so it doesn't get overwritten later on
         val dbAnime = getAnime.await(anime.id)?.takeIf { it.favorite } ?: return emptyList()
+
+        if (dbAnime.fetchType == FetchType.Seasons) {
+            val seasons = source.getSeasonList(dbAnime.toSAnime())
+            syncSeasonsWithSource.await(seasons, dbAnime, source, false, fetchWindow)
+            return emptyList()
+        }
+
+        val episodes = source.getEpisodeList(anime.toSAnime())
 
         return syncEpisodesWithSource.await(episodes, dbAnime, source, false, fetchWindow)
     }
@@ -440,6 +504,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         updatingAnime: CopyOnWriteArrayList<Anime>,
         completed: AtomicInteger,
         anime: Anime,
+        showBanner: Boolean,
         block: suspend () -> Unit,
     ) = coroutineScope {
         ensureActive()
@@ -451,7 +516,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             animeToUpdate.size,
         )
         
-        if (animeToUpdate.isNotEmpty()) {
+        if (showBanner && animeToUpdate.isNotEmpty()) {
             setProgress(workDataOf("progress" to (completed.get() * 100 / animeToUpdate.size)))
         }
 
@@ -467,7 +532,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             animeToUpdate.size,
         )
         
-        if (animeToUpdate.isNotEmpty()) {
+        if (showBanner && animeToUpdate.isNotEmpty()) {
             setProgress(workDataOf("progress" to (completed.get() * 100 / animeToUpdate.size)))
         }
     }
@@ -504,6 +569,37 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         return File("")
     }
 
+    private suspend fun clearErrorFromDB(animeId: Long) {
+        deleteLibraryUpdateErrors.deleteMangaError(animeId)
+    }
+
+    private suspend fun writeErrorToDB(error: Pair<Anime, String?>) {
+        val errorMessage = error.second ?: context.stringResource(MR.strings.unknown_error)
+        val errorMessageId = insertLibraryUpdateErrorMessages.insert(
+            LibraryUpdateErrorMessage(-1L, errorMessage),
+        )
+
+        insertLibraryUpdateErrors.upsert(
+            LibraryUpdateError(id = -1L, animeId = error.first.id, messageId = errorMessageId, lastUpdate = 0L),
+        )
+    }
+
+    private suspend fun writeErrorsToDB(errors: List<Pair<Anime, String?>>) {
+        val libraryErrors = errors.groupBy({ it.second }, { it.first })
+        val errorMessages = insertLibraryUpdateErrorMessages.insertAll(
+            libraryUpdateErrorMessages = libraryErrors.keys.map { errorMessage ->
+                LibraryUpdateErrorMessage(-1L, errorMessage.orEmpty())
+            },
+        )
+        val errorList = mutableListOf<LibraryUpdateError>()
+        errorMessages.forEach { (messageId, message) ->
+            libraryErrors[message]?.forEach { anime ->
+                errorList.add(LibraryUpdateError(id = -1L, animeId = anime.id, messageId = messageId, lastUpdate = 0L))
+            }
+        }
+        insertLibraryUpdateErrors.insertAll(errorList)
+    }
+
     companion object {
         private const val TAG = "AnimeLibraryUpdate"
         private const val WORK_NAME_AUTO = "AnimeLibraryUpdate-auto"
@@ -537,7 +633,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             val preferences = Injekt.get<LibraryPreferences>()
             val interval = prefInterval ?: preferences.autoUpdateInterval().get()
             if (interval > 0) {
-                val restrictions = preferences.autoUpdateDeviceRestrictions().get()
+                val restrictions = preferences.autoUpdateDeviceRestrictions.get()
                 val constraints = Constraints(
                     requiredNetworkType = if (DEVICE_NETWORK_NOT_METERED in restrictions) {
                         NetworkType.UNMETERED
@@ -595,9 +691,10 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             )
 
             val syncPreferences: SyncPreferences = Injekt.get()
+            val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
 
             // Always sync the data before library update if syncing is enabled.
-            if (syncPreferences.isSyncEnabled()) {
+            if (syncPreferences.isSyncEnabled() && syncTriggerOpt.syncOnLibraryUpdate) {
                 // Check if SyncDataJob is already running
                 if (SyncDataJob.isRunning(context)) {
                     // SyncDataJob is already running

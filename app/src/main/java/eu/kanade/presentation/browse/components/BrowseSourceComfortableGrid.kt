@@ -6,26 +6,31 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import eu.kanade.presentation.library.components.AnimeComfortableGridItem
 import eu.kanade.presentation.library.components.CommonAnimeItemDefaults
+import kotlinx.collections.immutable.ImmutableSet
+import kotlinx.coroutines.flow.StateFlow
 import tachiyomi.domain.anime.model.Anime
 import tachiyomi.domain.anime.model.asAnimeCover
 import tachiyomi.presentation.core.util.plus
 
 @Composable
 fun BrowseSourceComfortableGrid(
-    animeList: LazyPagingItems<Anime>,
+    animeList: LazyPagingItems<StateFlow<Anime>>,
     columns: GridCells,
     contentPadding: PaddingValues,
-    onAnimeClick: (Anime) -> Unit,
-    onAnimeLongClick: (Anime) -> Unit,
+    onAnimeClick: (Anime, Int) -> Unit,
+    onAnimeLongClick: (Anime, Int) -> Unit,
     selection: List<Anime>,
-    favoriteIds: Set<Long> = emptySet(),
+    favoriteIds: ImmutableSet<Long>,
     onBatchIncrement: (Int) -> Unit = {},
+    usePanorama: Boolean? = null,
 ) {
     val selectionIds = remember(selection) { selection.map { it.id }.toSet() }
     LazyVerticalGrid(
@@ -42,19 +47,26 @@ fun BrowseSourceComfortableGrid(
 
         items(
             count = animeList.itemCount,
-            contentType = { index ->
-                if (animeList.peek(index) != null) "anime" else "placeholder"
-            },
+            key = { index -> "source-comfortable-grid-${animeList.peek(index)?.value?.id ?: "placeholder"}-$index" },
+            contentType = { index -> if (animeList.peek(index) != null) "anime" else "placeholder" },
         ) { index ->
-            val anime = animeList[index] ?: return@items
+            val anime by animeList[index]?.collectAsState() ?: return@items
             onBatchIncrement(index)
-            val isFavorite = remember(anime.id, favoriteIds) { anime.id in favoriteIds }
+            
+            val currentOnAnimeClick = remember(onAnimeClick, anime, index) { 
+                { onAnimeClick(anime, index) } 
+            }
+            val currentOnAnimeLongClick = remember(onAnimeLongClick, anime, index) { 
+                { onAnimeLongClick(anime, index) } 
+            }
+            
             BrowseSourceComfortableGridItem(
                 anime = anime,
-                isFavorite = isFavorite,
+                isFavorite = anime.id in favoriteIds,
                 isSelected = anime.id in selectionIds,
-                onClick = { onAnimeClick(anime) },
-                onLongClick = { onAnimeLongClick(anime) },
+                onClick = currentOnAnimeClick,
+                onLongClick = currentOnAnimeLongClick,
+                usePanorama = usePanorama,
             )
         }
 
@@ -73,6 +85,7 @@ internal fun BrowseSourceComfortableGridItem(
     isSelected: Boolean = false,
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = onClick,
+    usePanorama: Boolean? = null,
 ) {
     AnimeComfortableGridItem(
         title = anime.title,
@@ -86,5 +99,6 @@ internal fun BrowseSourceComfortableGridItem(
         onLongClick = onLongClick,
         onClick = onClick,
         isSelected = isSelected,
+        usePanorama = usePanorama,
     )
 }

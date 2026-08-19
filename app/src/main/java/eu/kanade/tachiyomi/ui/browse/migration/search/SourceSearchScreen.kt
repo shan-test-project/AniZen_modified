@@ -55,7 +55,7 @@ import tachiyomi.presentation.core.components.material.ExtendedFloatingActionBut
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
-import tachiyomi.source.local.LocalSource
+import tachiyomi.source.localanime.LocalAnimeSource
 
 data class SourceSearchScreen(
     private val oldAnime: Anime,
@@ -143,10 +143,11 @@ data class SourceSearchScreen(
                     )
                 },
                 onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
-                onLocalSourceHelpClick = { uriHandler.openUri(LocalSource.HELP_URL) },
-                onAnimeClick = openMigrateDialog,
-                onAnimeLongClick = { navigator.push(AnimeScreen(it.id, true)) },
+                onLocalSourceHelpClick = { uriHandler.openUri(LocalAnimeSource.HELP_URL) },
+                onAnimeClick = { anime, _ -> openMigrateDialog(anime) },
+                onAnimeLongClick = { anime, _ -> navigator.push(AnimeScreen(anime.id, true)) },
                 selection = state.selection.toImmutableList(),
+                favoriteIds = state.favoriteIds,
             )
         }
 
@@ -198,13 +199,13 @@ data class SourceSearchScreen(
                 MigrateDialog(
                     oldAnime = oldAnime,
                     newAnime = dialog.newAnime,
-                    screenModel = rememberScreenModel { MigrateDialogScreenModel() },
+                    screenModel = rememberScreenModel { MigrateDialogScreenModel(oldAnime.id) },
                     onDismissRequest = onDismissRequest,
                     onClickTitle = { navigator.push(AnimeScreen(dialog.newAnime.id)) },
                     onPopScreen = {
                         scope.launch {
                             navigator.popUntilRoot()
-                            HomeScreen.openTab(HomeScreen.Tab.Browse())
+                            HomeScreen.openTab(HomeScreen.HomeTab.Browse())
                             navigator.push(AnimeScreen(dialog.newAnime.id))
                         }
                     },

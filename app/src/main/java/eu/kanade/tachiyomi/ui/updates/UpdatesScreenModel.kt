@@ -17,6 +17,8 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.util.lang.toLocalDate
+import eu.kanade.tachiyomi.ui.player.loader.EpisodeLoader
+import eu.kanade.tachiyomi.ui.player.loader.HosterLoader
 import kotlinx.collections.immutable.PersistentList
 import kotlinx.collections.immutable.mutate
 import kotlinx.collections.immutable.persistentListOf
@@ -87,7 +89,7 @@ class UpdatesScreenModel(
                         it.copy(
                             isLoading = false,
                             items = items,
-                            uiModels = items.toUiModel(),
+                            uiModels = items.toUiModel(it.expandedState),
                         )
                     }
                 }
@@ -128,28 +130,57 @@ class UpdatesScreenModel(
             .toPersistentList()
     }
 
-    private fun List<UpdatesItem>.toUiModel(): List<UpdatesUiModel> {
+    private fun List<UpdatesItem>.toUiModel(expandedState: Set<String>): List<UpdatesUiModel> {
         val uiModels = mutableListOf<UpdatesUiModel>()
-        var i = 0
-        while (i < this.size) {
-            val item = this[i]
-            val date = item.update.dateFetch.toLocalDate()
-            uiModels.add(UpdatesUiModel.Header(date))
-
-            val group = mutableListOf<UpdatesItem>()
-            while (i < this.size && this[i].update.dateFetch.toLocalDate() == date) {
-                group.add(this[i])
-                i++
+        
+        // Group all updates by anime
+        val animeGroups = this.groupBy { it.update.animeId }
+        
+        // Find the latest fetch date for each anime group
+        val animeLatestDate = animeGroups.mapValues { (_, items) ->
+            items.maxOf { it.update.dateFetch }.toLocalDate()
+        }
+        
+        // Group these anime blocks by their latest fetch date
+        val dateGroups = animeLatestDate.entries
+            .groupBy { it.value } // Group by LocalDate
+            .mapValues { entry -> 
+                entry.value.map { it.key } // List of animeIds for this date
             }
+            .toSortedMap(compareByDescending { it })
 
-            group.forEachIndexed { index, updatesItem ->
-                val position = when {
-                    group.size == 1 -> UpdatesUiModel.ItemPosition.SINGLE
-                    index == 0 -> UpdatesUiModel.ItemPosition.TOP
-                    index == group.size - 1 -> UpdatesUiModel.ItemPosition.BOTTOM
-                    else -> UpdatesUiModel.ItemPosition.MIDDLE
+        dateGroups.forEach { (date, animeIds) ->
+            uiModels.add(UpdatesUiModel.Header(date))
+            
+            animeIds.forEach { animeId ->
+                val items = animeGroups[animeId]!!
+                val latestFetchDate = items.maxOf { it.update.dateFetch }.toLocalDate()
+                val hasUnwatched = items.any { !it.update.seen }
+                val filteredItems = if (hasUnwatched) {
+                    items.filterNot { it.update.seen && it.update.dateFetch.toLocalDate() < latestFetchDate }
+                } else {
+                    items
                 }
-                uiModels.add(UpdatesUiModel.Item(updatesItem, position))
+                val animeItems = filteredItems.sortedWith(
+                    compareBy<UpdatesItem> { it.update.seen }
+                        .thenByDescending { it.update.lastSecondSeen > 0 }
+                        .thenBy { if (it.update.seen) -it.update.episodeNumber else it.update.episodeNumber },
+                )
+                
+                val isExpandable = animeItems.size > 1
+                animeItems.forEachIndexed { index, updatesItem ->
+                    val position = when {
+                        animeItems.size == 1 -> UpdatesUiModel.ItemPosition.SINGLE
+                        index == 0 -> UpdatesUiModel.ItemPosition.TOP
+                        index == animeItems.size - 1 -> UpdatesUiModel.ItemPosition.BOTTOM
+                        else -> UpdatesUiModel.ItemPosition.MIDDLE
+                    }
+                    if (index == 0) {
+                        uiModels.add(UpdatesUiModel.Leader(updatesItem, position, isExpandable))
+                    } else {
+                        uiModels.add(UpdatesUiModel.Item(updatesItem, position, isExpandable))
+                    }
+                }
             }
         }
         return uiModels
@@ -180,7 +211,7 @@ class UpdatesScreenModel(
                     downloadProgressProvider = { download.progress },
                 )
             }
-            state.copy(items = newItems, uiModels = newItems.toUiModel())
+            state.copy(items = newItems, uiModels = newItems.toUiModel(state.expandedState))
         }
     }
 
@@ -284,7 +315,7 @@ class UpdatesScreenModel(
                 // Don't download if source isn't available
                 sourceManager.get(anime.source) ?: continue
                 val episodes = updates.mapNotNull { getEpisode.await(it.update.episodeId) }
-                downloadManager.downloadEpisodes(anime, episodes, true, alt)
+                downloadManager.downloadEpisodes(anime, episodes, true, useExternalDownloader || alt)
             }
         }
     }
@@ -303,7 +334,7 @@ class UpdatesScreenModel(
                     val anime = getAnime.await(animeId) ?: return@forEach
                     val source = sourceManager.get(anime.source) ?: return@forEach
                     val episodes = updates.mapNotNull { getEpisode.await(it.update.episodeId) }
-                    downloadManager.deleteEpisodes(episodes, anime, source)
+                    downloadManager.deleteEpisodes(episodes, anime, source, isManual = true)
                 }
         }
         toggleAllSelection(false)
@@ -324,12 +355,19 @@ class UpdatesScreenModel(
         )
     }
 
+    data class UpdateSelectionOptions(
+        val selected: Boolean,
+        val userSelected: Boolean = false,
+        val fromLongPress: Boolean = false,
+        val isGroup: Boolean = false,
+        val isExpanded: Boolean = false,
+    )
+
     fun toggleSelection(
         item: UpdatesItem,
-        selected: Boolean,
-        userSelected: Boolean = false,
-        fromLongPress: Boolean = false,
+        selectionOptions: UpdateSelectionOptions,
     ) {
+        val (selected, userSelected, fromLongPress, isGroup, isExpanded) = selectionOptions
         mutableState.update { state ->
             val newItems = state.items.toMutableList().apply {
                 val selectedIndex = indexOfFirst { it.update.episodeId == item.update.episodeId }
@@ -341,6 +379,23 @@ class UpdatesScreenModel(
                 val firstSelection = none { it.selected }
                 set(selectedIndex, selectedItem.copy(selected = selected))
                 selectedEpisodeIds.addOrRemove(item.update.episodeId, selected)
+
+                if (isGroup && !isExpanded) {
+                    val selectedItemDate = selectedItem.update.dateFetch.toLocalDate()
+                    val zone = java.time.ZoneId.systemDefault()
+                    val dayStartMillis = selectedItemDate.atStartOfDay(zone).toInstant().toEpochMilli()
+                    val dayEndMillis = selectedItemDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+
+                    state.items.mapIndexed { index, item -> index to item }
+                        .filter {
+                            it.second.update.animeId == selectedItem.update.animeId &&
+                                it.second.update.dateFetch in dayStartMillis..<dayEndMillis
+                        }
+                        .forEach { (index, item) ->
+                            set(index, item.copy(selected = selected))
+                            selectedEpisodeIds.addOrRemove(item.update.episodeId, selected)
+                        }
+                }
 
                 if (selected && userSelected && fromLongPress) {
                     if (firstSelection) {
@@ -385,7 +440,7 @@ class UpdatesScreenModel(
                 }
             }
             val persistentItems = newItems.toPersistentList()
-            state.copy(items = persistentItems, uiModels = persistentItems.toUiModel())
+            state.copy(items = persistentItems, uiModels = persistentItems.toUiModel(state.expandedState))
         }
     }
 
@@ -396,7 +451,7 @@ class UpdatesScreenModel(
                 it.copy(selected = selected)
             }
             val persistentItems = newItems.toPersistentList()
-            state.copy(items = persistentItems, uiModels = persistentItems.toUiModel())
+            state.copy(items = persistentItems, uiModels = persistentItems.toUiModel(state.expandedState))
         }
 
         selectedPositions[0] = -1
@@ -410,7 +465,7 @@ class UpdatesScreenModel(
                 it.copy(selected = !it.selected)
             }
             val persistentItems = newItems.toPersistentList()
-            state.copy(items = persistentItems, uiModels = persistentItems.toUiModel())
+            state.copy(items = persistentItems, uiModels = persistentItems.toUiModel(state.expandedState))
         }
         selectedPositions[0] = -1
         selectedPositions[1] = -1
@@ -420,8 +475,21 @@ class UpdatesScreenModel(
         mutableState.update { it.copy(dialog = dialog) }
     }
 
+    fun toggleExpandedState(key: String) {
+        mutableState.update {
+            val newExpandedState = it.expandedState.toMutableSet().apply {
+                if (it.expandedState.contains(key)) remove(key) else add(key)
+            }
+            it.copy(
+                expandedState = newExpandedState,
+                uiModels = it.items.toUiModel(newExpandedState),
+            )
+        }
+    }
+
     fun resetNewUpdatesCount() {
         libraryPreferences.newUpdatesCount().set(0)
+        libraryPreferences.newMangaUpdatesCount().set(0)
     }
 
     @Immutable
@@ -429,6 +497,7 @@ class UpdatesScreenModel(
         val isLoading: Boolean = true,
         val items: PersistentList<UpdatesItem> = persistentListOf(),
         val uiModels: List<UpdatesUiModel> = emptyList(),
+        val expandedState: Set<String> = emptySet(),
         val dialog: Dialog? = null,
     ) {
         val selected = items.filter { it.selected }
@@ -461,3 +530,6 @@ data class UpdatesItem(
     var fileSize: Long?,
     // <-- AM (FILE_SIZE)
 )
+
+/** String to identify which anime's update on which day it is collapsing */
+fun UpdatesWithRelations.groupByDateAndAnime() = animeId.toString()

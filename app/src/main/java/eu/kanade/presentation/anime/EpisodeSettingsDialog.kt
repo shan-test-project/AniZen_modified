@@ -1,13 +1,21 @@
 package eu.kanade.presentation.anime
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PeopleAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -15,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.kanade.domain.anime.model.downloadedFilter
@@ -26,11 +35,15 @@ import tachiyomi.core.common.preference.TriState
 import tachiyomi.domain.anime.model.Anime
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.ank.AMR
+import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.components.RadioItem
 import tachiyomi.presentation.core.components.SortItem
 import tachiyomi.presentation.core.components.TriStateItem
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.theme.active
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 @Composable
 fun EpisodeSettingsDialog(
@@ -44,7 +57,11 @@ fun EpisodeSettingsDialog(
     // <-- AM (FILLERMARK)
     onSortModeChanged: (Long) -> Unit,
     onDisplayModeChanged: (Long) -> Unit,
+    onShowPreviewsEnabled: (Long) -> Unit,
+    onShowSummariesEnabled: (Long) -> Unit,
     onSetAsDefault: (applyToExistingAnime: Boolean) -> Unit,
+    scanlatorFilterActive: Boolean,
+    onScanlatorFilterClicked: () -> Unit,
 ) {
     var showSetAsDefaultDialog by rememberSaveable { mutableStateOf(false) }
     if (showSetAsDefaultDialog) {
@@ -90,6 +107,8 @@ fun EpisodeSettingsDialog(
                         fillermarkedFilter = anime?.fillermarkedFilter ?: TriState.DISABLED,
                         onFillermarkedFilterChanged = onFillermarkedFilterChanged,
                         // <-- AM (FILLERMARK)
+                        scanlatorFilterActive = scanlatorFilterActive,
+                        onScanlatorFilterClicked = onScanlatorFilterClicked,
                     )
                 }
                 1 -> {
@@ -101,8 +120,13 @@ fun EpisodeSettingsDialog(
                 }
                 2 -> {
                     DisplayPage(
-                        displayMode = anime?.displayMode ?: 0,
-                        onItemSelected = onDisplayModeChanged,
+                        anime = anime,
+                        displayMode = anime?.displayMode ?: Anime.EPISODE_DISPLAY_NAME,
+                        onDisplayModeChanged = onDisplayModeChanged,
+                        showPreviews = anime?.showPreviews() ?: true,
+                        onShowPreviewsEnabled = onShowPreviewsEnabled,
+                        showSummaries = anime?.showSummaries() ?: true,
+                        onShowSummariesEnabled = onShowSummariesEnabled,
                     )
                 }
             }
@@ -122,6 +146,8 @@ private fun ColumnScope.FilterPage(
     fillermarkedFilter: TriState,
     onFillermarkedFilterChanged: (TriState) -> Unit,
     // <-- AM (FILLERMARK)
+    scanlatorFilterActive: Boolean,
+    onScanlatorFilterClicked: () -> Unit,
 ) {
     TriStateItem(
         label = stringResource(MR.strings.label_downloaded),
@@ -145,6 +171,40 @@ private fun ColumnScope.FilterPage(
         onClick = onFillermarkedFilterChanged,
     )
     // <-- AM (FILLERMARK)
+
+    ScanlatorFilterItem(
+        active = scanlatorFilterActive,
+        onClick = onScanlatorFilterClicked,
+    )
+}
+
+@Composable
+fun ScanlatorFilterItem(
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .fillMaxWidth()
+            .padding(horizontal = TabbedDialogPaddings.Horizontal, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.PeopleAlt,
+            contentDescription = null,
+            tint = if (active) {
+                MaterialTheme.colorScheme.active
+            } else {
+                LocalContentColor.current
+            },
+        )
+        Text(
+            text = stringResource(MR.strings.scanlator),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
 }
 
 @Composable
@@ -169,8 +229,13 @@ private fun ColumnScope.SortPage(
 
 @Composable
 private fun ColumnScope.DisplayPage(
+    anime: Anime?,
     displayMode: Long,
-    onItemSelected: (Long) -> Unit,
+    onDisplayModeChanged: (Long) -> Unit,
+    showPreviews: Boolean,
+    onShowPreviewsEnabled: (Long) -> Unit,
+    showSummaries: Boolean,
+    onShowSummariesEnabled: (Long) -> Unit,
 ) {
     listOf(
         MR.strings.show_title to Anime.EPISODE_DISPLAY_NAME,
@@ -179,8 +244,57 @@ private fun ColumnScope.DisplayPage(
         RadioItem(
             label = stringResource(titleRes),
             selected = displayMode == mode,
-            onClick = { onItemSelected(mode) },
+            onClick = { onDisplayModeChanged(mode) },
         )
+    }
+
+    androidx.compose.material3.HorizontalDivider(
+        modifier = Modifier.padding(vertical = 8.dp),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
+    )
+
+    val showPreviewsFlag = if (showPreviews) Anime.EPISODE_SHOW_NOT_PREVIEWS else Anime.EPISODE_SHOW_PREVIEWS
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_show_episode_thumbnail),
+        checked = showPreviews,
+        onClick = { onShowPreviewsEnabled(showPreviewsFlag) },
+    )
+
+    val showSummariesFlag = if (showSummaries) Anime.EPISODE_SHOW_NOT_SUMMARIES else Anime.EPISODE_SHOW_SUMMARIES
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_show_episode_summary),
+        checked = showSummaries,
+        onClick = { onShowSummariesEnabled(showSummariesFlag) },
+    )
+
+    val libraryPreferences: tachiyomi.domain.library.service.LibraryPreferences = Injekt.get()
+    if (anime != null) {
+        androidx.compose.material3.HorizontalDivider(
+            modifier = Modifier.padding(vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
+        )
+
+        Text(
+            text = "Season grouping",
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+
+        listOf(
+            "Default (Use app setting)" to Anime.EPISODE_SEASON_GROUP_DEFAULT,
+            "Disabled" to Anime.EPISODE_SEASON_GROUP_OFF,
+            "Headers" to Anime.EPISODE_SEASON_GROUP_ON,
+            "Tabs" to Anime.EPISODE_SEASON_GROUP_TABS,
+        ).map { (label, flag) ->
+            RadioItem(
+                label = label,
+                selected = (anime.episodeFlags and Anime.EPISODE_SEASON_GROUP_MASK) == flag,
+                onClick = {
+                    onDisplayModeChanged(flag or 0x10000000L) // Use a high bit to indicate season grouping change
+                },
+            )
+        }
     }
 }
 

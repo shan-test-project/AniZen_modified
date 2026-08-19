@@ -28,9 +28,9 @@ fun TabText(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (badgeCount != null) {
+        if (badgeCount != null && badgeCount > 0) {
             Pill(
-                text = "$badgeCount",
+                text = if (badgeCount > 99) "99+" else "$badgeCount",
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = pillAlpha),
                 fontSize = 10.sp,
             )

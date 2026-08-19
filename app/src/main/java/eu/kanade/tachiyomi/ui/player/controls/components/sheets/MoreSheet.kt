@@ -39,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -76,7 +77,6 @@ import eu.kanade.tachiyomi.ui.player.settings.AudioChannels
 import eu.kanade.tachiyomi.ui.player.settings.AudioPreferences
 import eu.kanade.tachiyomi.ui.player.settings.GesturePreferences
 import `is`.xyz.mpv.MPVLib
-import kotlinx.collections.immutable.ImmutableList
 import tachiyomi.domain.custombuttons.model.CustomButton
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
@@ -93,17 +93,16 @@ fun MoreSheet(
     onStartTimer: (Int) -> Unit,
     onDismissRequest: () -> Unit,
     onEnterFiltersPanel: () -> Unit,
-    customButtons: ImmutableList<CustomButton>,
+    customButtons: List<CustomButton>,
     modifier: Modifier = Modifier,
 ) {
     val advancedPreferences = remember { Injekt.get<AdvancedPlayerPreferences>() }
     val audioPreferences = remember { Injekt.get<AudioPreferences>() }
     val gesturePreferences = remember { Injekt.get<GesturePreferences>() }
-    val statisticsPage by advancedPreferences.playerStatisticsPage().collectAsState()
     val longPressAction by gesturePreferences.longPressAction().collectAsState()
     val pausedLongPressAction by gesturePreferences.pausedLongPressAction().collectAsState()
     val longPressSliding by gesturePreferences.gestureLongPressSpeedSliding().collectAsState()
-    val sheetId = remember { Any().hashCode() }
+    val statisticsPage by advancedPreferences.playerStatisticsPage().collectAsState()
 
     PlayerSheet(
         onDismissRequest = onDismissRequest,
@@ -174,7 +173,7 @@ fun MoreSheet(
             ) {
                 itemsIndexed(
                     items = Decoder.entries.minus(Decoder.Auto),
-                    key = { index, it -> "decoder-$sheetId-$index-${it.name}" }
+                    key = { _, it -> "ms-decoder-${it.name}" }
                 ) { _, decoder ->
                     FilterChip(
                         selected = decoder == selectedDecoder,
@@ -190,7 +189,7 @@ fun MoreSheet(
             ) {
                 items(
                     count = 7,
-                    key = { "stats-page-$sheetId-$it" }
+                    key = { "ms-stats-page-$it" }
                 ) { page ->
                     FilterChip(
                         label = {
@@ -284,7 +283,7 @@ fun MoreSheet(
             ) {
                 itemsIndexed(
                     items = AudioChannels.entries,
-                    key = { index, it -> "audio-channels-$sheetId-$index-${it.name}" }
+                    key = { _, it -> "ms-audio-channels-${it.name}" }
                 ) { _, it ->
                     FilterChip(
                         selected = audioChannels == it,
@@ -308,7 +307,7 @@ fun MoreSheet(
             ) {
                 itemsIndexed(
                     items = LongPressAction.entries,
-                    key = { index, it -> "long-press-action-$sheetId-$index-${it.name}" }
+                    key = { _, it -> "ms-lp-playing-${it.name}" }
                 ) { _, action ->
                     FilterChip(
                         selected = longPressAction == action,
@@ -324,7 +323,7 @@ fun MoreSheet(
             ) {
                 itemsIndexed(
                     items = PausedLongPressAction.entries,
-                    key = { index, it -> "paused-long-press-action-$sheetId-$index-${it.name}" }
+                    key = { _, it -> "ms-lp-paused-${it.name}" }
                 ) { _, action ->
                     FilterChip(
                         selected = pausedLongPressAction == action,

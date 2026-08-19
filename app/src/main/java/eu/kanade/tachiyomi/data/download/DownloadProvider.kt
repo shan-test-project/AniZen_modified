@@ -8,15 +8,19 @@ import eu.kanade.tachiyomi.util.storage.DiskUtil
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.displayablePath
+import tachiyomi.core.common.storage.nameWithoutExtension
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.anime.model.Anime
 import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.i18n.MR
-import tachiyomi.source.local.io.LocalSourceFileSystem
-import tachiyomi.source.local.isLocal
+import tachiyomi.source.localanime.io.LocalAnimeSourceFileSystem
+import tachiyomi.source.localanime.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * This class is used to provide the directories where the downloads should be saved.
@@ -28,12 +32,15 @@ class DownloadProvider(
     private val context: Context,
     private val storageManager: StorageManager = Injekt.get(),
     // AM (FILE_SIZE) -->
-    private val localFileSystem: LocalSourceFileSystem = Injekt.get(),
+    private val localFileSystem: LocalAnimeSourceFileSystem = Injekt.get(),
     // <-- AM (FILE_SIZE)
 ) {
 
     private val downloadsDir: UniFile?
         get() = storageManager.getDownloadsDirectory()
+
+    private val dirMutex = Mutex()
+    private val animeDirCache = android.util.LruCache<String, UniFile>(100)
 
     /**
      * Returns the download directory for an anime. For internal use only.
@@ -41,11 +48,20 @@ class DownloadProvider(
      * @param animeTitle the title of the anime to query.
      * @param source the source of the anime.
      */
-    internal fun getAnimeDir(animeTitle: String, source: Source): UniFile {
+    suspend fun getAnimeDir(animeTitle: String, source: Source): UniFile {
+        val cacheKey = "${source.id}_$animeTitle"
+        animeDirCache.get(cacheKey)?.let { 
+            if (it.exists()) return it else animeDirCache.remove(cacheKey) 
+        }
+        
         try {
-            return downloadsDir!!
-                .createDirectory(getSourceDirName(source))!!
-                .createDirectory(getAnimeDirName(animeTitle))!!
+            return dirMutex.withLock {
+                val dir = downloadsDir!!
+                    .createDirectory(getSourceDirName(source))!!
+                    .createDirectory(getAnimeDirName(animeTitle))!!
+                animeDirCache.put(cacheKey, dir)
+                dir
+            }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "Invalid download directory" }
             throw Exception(
@@ -63,6 +79,9 @@ class DownloadProvider(
      * @param source the source to query.
      */
     fun findSourceDir(source: Source): UniFile? {
+        if (source.isLocal()) {
+            return localFileSystem.getBaseDirectory()
+        }
         return downloadsDir?.findFile(getSourceDirName(source))
     }
 
@@ -73,8 +92,22 @@ class DownloadProvider(
      * @param source the source of the anime.
      */
     fun findAnimeDir(animeTitle: String, source: Source): UniFile? {
-        val sourceDir = findSourceDir(source)
-        return sourceDir?.findFile(getAnimeDirName(animeTitle))
+        val cacheKey = "${source.id}_$animeTitle"
+        animeDirCache.get(cacheKey)?.let {
+            if (it.exists()) return it else animeDirCache.remove(cacheKey)
+        }
+
+        val dir = if (source.isLocal()) {
+            localFileSystem.getAnimeDirectory(animeTitle)
+        } else {
+            val sourceDir = findSourceDir(source)
+            sourceDir?.findFile(getAnimeDirName(animeTitle))
+        }
+
+        if (dir != null) {
+            animeDirCache.put(cacheKey, dir)
+        }
+        return dir
     }
 
     /**
@@ -92,6 +125,9 @@ class DownloadProvider(
         source: Source,
     ): UniFile? {
         val animeDir = findAnimeDir(animeTitle, source)
+        if (source.isLocal()) {
+            return animeDir?.listFiles().orEmpty().find { it.nameWithoutExtension == episodeName }
+        }
         return getValidEpisodeDirNames(episodeName, episodeScanlator).asSequence()
             .mapNotNull { animeDir?.findFile(it) }
             .firstOrNull()
@@ -105,7 +141,19 @@ class DownloadProvider(
      * @param source the source of the episode.
      */
     fun findEpisodeDirs(episodes: List<Episode>, anime: Anime, source: Source): Pair<UniFile?, List<UniFile>> {
-        val animeDir = findAnimeDir(anime.title, source) ?: return null to emptyList()
+        val animeDir = findAnimeDir(if (source.isLocal()) anime.url else anime.ogTitle, source)
+        if (source.isLocal()) {
+            val files = animeDir?.listFiles().orEmpty()
+            return animeDir to episodes.mapNotNull { episode ->
+                // Try finding by URL filename first
+                val filenameFromUrl = episode.url.split('/', limit = 2).lastOrNull()
+                val fileByUrl = filenameFromUrl?.let { animeDir?.findFile(it) }
+
+                // Fallback to finding by name without extension
+                fileByUrl ?: files.find { it.nameWithoutExtension == episode.name }
+            }
+        }
+        if (animeDir == null) return null to emptyList()
         return animeDir to episodes.mapNotNull { episode ->
             getValidEpisodeDirNames(episode.name, episode.scanlator).asSequence()
                 .mapNotNull { animeDir.findFile(it) }

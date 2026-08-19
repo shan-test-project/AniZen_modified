@@ -24,27 +24,31 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreTime
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import eu.kanade.tachiyomi.ui.player.PlayerViewModel.VideoTrack
-import kotlinx.collections.immutable.ImmutableList
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun AudioTracksSheet(
-    tracks: ImmutableList<VideoTrack>,
+    tracks: List<VideoTrack>,
     selectedId: Int,
-    onSelect: (Int) -> Unit,
+    onSelect: (VideoTrack) -> Unit,
     onAddAudioTrack: () -> Unit,
     onOpenDelayPanel: () -> Unit,
     onDismissRequest: () -> Unit,
@@ -75,10 +79,18 @@ fun AudioTracksSheet(
             )
         },
         track = {
+            val isSelected = when (it) {
+                is VideoTrack.Internal -> selectedId == it.id
+                is VideoTrack.External -> selectedId == it.mpvId
+            }
+            val isLoading = it is VideoTrack.External && it.isLoading
+            val isFailed = it is VideoTrack.External && it.isFailed
             AudioTrackRow(
                 title = getTrackTitle(it),
-                isSelected = selectedId == it.id,
-                onClick = { onSelect(it.id) },
+                isSelected = isSelected,
+                isLoading = isLoading,
+                isFailed = isFailed,
+                onClick = { onSelect(it) },
             )
         },
         modifier = modifier,
@@ -91,6 +103,8 @@ fun AudioTrackRow(
     isSelected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isLoading: Boolean = false,
+    isFailed: Boolean = false,
 ) {
     Row(
         modifier = modifier
@@ -109,5 +123,17 @@ fun AudioTrackRow(
             fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
             fontStyle = if (isSelected) FontStyle.Italic else FontStyle.Normal,
         )
+        if (isLoading) {
+            Spacer(modifier = Modifier.weight(1f))
+            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+        } else if (isFailed) {
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(
+                imageVector = Icons.Default.ErrorOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(24.dp),
+            )
+        }
     }
 }

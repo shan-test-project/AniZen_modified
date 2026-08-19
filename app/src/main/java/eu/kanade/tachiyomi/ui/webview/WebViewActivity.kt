@@ -85,7 +85,6 @@ class WebViewActivity : BaseActivity() {
         // AM (DISCORD) -->
         lifecycleScope.launchIO {
             DiscordRPCService.setAnimeScreen(this@WebViewActivity, DiscordScreen.WEBVIEW)
-            DiscordRPCService.setMangaScreen(this@WebViewActivity, DiscordScreen.WEBVIEW)
         }
         // <-- AM (DISCORD)
     }
@@ -94,11 +93,15 @@ class WebViewActivity : BaseActivity() {
     override fun onDestroy() {
         lifecycleScope.launchIO {
             DiscordRPCService.setAnimeScreen(this@WebViewActivity, DiscordRPCService.lastUsedScreen)
-            DiscordRPCService.setMangaScreen(this@WebViewActivity, DiscordRPCService.lastUsedScreen)
         }
         super.onDestroy()
     }
     // <-- AM (DISCORD)
+
+    override fun onPause() {
+        super.onPause()
+        android.webkit.CookieManager.getInstance().flush()
+    }
 
     override fun onProvideAssistContent(outContent: AssistContent) {
         super.onProvideAssistContent(outContent)

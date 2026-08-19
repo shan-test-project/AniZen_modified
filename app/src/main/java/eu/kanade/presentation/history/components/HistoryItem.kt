@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -22,6 +23,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
+import androidx.compose.runtime.getValue
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.anime.components.AnimeCover
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.presentation.util.formatEpisodeNumber
@@ -30,6 +36,8 @@ import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 private val HistoryItemHeight = 96.dp
 
@@ -40,7 +48,9 @@ fun HistoryItem(
     onClickResume: () -> Unit,
     onClickDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    usePanorama: Boolean = false,
 ) {
+    val (entry, ratio) = AnimeCover.getEntry(history.animeId, usePanoramaOverride = usePanorama)
     Row(
         modifier = modifier
             .clickable(onClick = onClickResume)
@@ -48,11 +58,11 @@ fun HistoryItem(
             .padding(horizontal = MaterialTheme.padding.medium, vertical = MaterialTheme.padding.small),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AnimeCover.Book(
+        entry(
             modifier = Modifier.fillMaxHeight(),
             data = history.coverData,
             onClick = onClickCover,
-            ratio = AnimeCover.Book.ratio,
+            ratio = ratio,
         )
         Column(
             modifier = Modifier
@@ -67,20 +77,32 @@ fun HistoryItem(
                 overflow = TextOverflow.Ellipsis,
                 style = textStyle,
             )
-            val seenAt = remember { history.seenAt?.toTimestampString() ?: "" }
-            Text(
-                text = if (history.episodeNumber > -1) {
-                    stringResource(
-                        MR.strings.recent_anime_time,
-                        formatEpisodeNumber(history.episodeNumber),
-                        seenAt,
+            val seenAt = remember(history.seenAt) { history.seenAt?.toTimestampString() ?: "" }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!history.seen) {
+                    Icon(
+                        imageVector = Icons.Filled.Circle,
+                        contentDescription = stringResource(MR.strings.unseen),
+                        modifier = Modifier
+                            .height(8.dp)
+                            .padding(end = 4.dp),
+                        tint = MaterialTheme.colorScheme.primary,
                     )
-                } else {
-                    seenAt
-                },
-                modifier = Modifier.padding(top = 4.dp),
-                style = textStyle,
-            )
+                }
+                Text(
+                    text = if (history.episodeNumber > -1) {
+                        stringResource(
+                            MR.strings.recent_anime_time,
+                            formatEpisodeNumber(history.episodeNumber),
+                            seenAt,
+                        )
+                    } else {
+                        seenAt
+                    },
+                    modifier = Modifier.padding(top = 4.dp),
+                    style = textStyle,
+                )
+            }
         }
 
         IconButton(onClick = onClickDelete) {

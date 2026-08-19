@@ -9,15 +9,21 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.FlipToBack
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Panorama
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
@@ -48,7 +54,9 @@ import kotlin.time.Duration.Companion.seconds
 
 import eu.kanade.domain.ui.ContainerStyle
 import eu.kanade.domain.ui.UiPreferences
-import tachiyomi.presentation.core.util.collectAsState
+import eu.kanade.domain.ui.model.PanoramaMode
+import eu.kanade.presentation.components.PanoramaModeToggle
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
 
 @Composable
 fun UpdateScreen(
@@ -60,19 +68,22 @@ fun UpdateScreen(
     onInvertSelection: () -> Unit,
     onCalendarClicked: () -> Unit,
     onUpdateLibrary: () -> Boolean,
+    onToggleExpand: (String) -> Unit,
     onDownloadEpisode: (List<UpdatesItem>, EpisodeDownloadAction) -> Unit,
     onMultiBookmarkClicked: (List<UpdatesItem>, bookmark: Boolean) -> Unit,
-    // AM (FILLERMARK) -->
     onMultiFillermarkClicked: (List<UpdatesItem>, fillermark: Boolean) -> Unit,
-    // <-- AM (FILLERMARK)
     onMultiMarkAsSeenClicked: (List<UpdatesItem>, seen: Boolean) -> Unit,
     onMultiDeleteClicked: (List<UpdatesItem>) -> Unit,
-    onUpdateSelected: (UpdatesItem, Boolean, Boolean, Boolean) -> Unit,
+    onUpdateSelected: (UpdatesItem, UpdatesScreenModel.UpdateSelectionOptions) -> Unit,
     onOpenEpisode: (UpdatesItem, altPlayer: Boolean) -> Unit,
     navigateUp: (() -> Unit)?,
 ) {
     val uiPreferences = remember { Injekt.get<UiPreferences>() }
-    val containerStyles by uiPreferences.containerStyles().collectAsState()
+    val globalPanorama by uiPreferences.panoramaCover().collectAsStatePref() as State<Boolean>
+    val updatesMode by uiPreferences.updatesPanoramaMode().collectAsStatePref() as State<PanoramaMode>
+    val effectivePanorama = remember(globalPanorama, updatesMode) { updatesMode.resolve(globalPanorama) }
+
+    val containerStyles by uiPreferences.containerStyles().collectAsStatePref() as State<Set<String>>
     val useContainer = remember(containerStyles) { ContainerStyle.UPDATES in containerStyles }
 
     BackHandler(enabled = state.selectionMode, onBack = { onSelectAll(false) })
@@ -88,6 +99,11 @@ fun UpdateScreen(
                 onCancelActionMode = { onSelectAll(false) },
                 navigateUp = navigateUp,
                 scrollBehavior = scrollBehavior,
+                panoramaMode = updatesMode,
+                globalPanorama = globalPanorama,
+                onPanoramaModeChange = { next ->
+                    uiPreferences.updatesPanoramaMode().set(next)
+                },
             )
         },
         bottomBar = {
@@ -120,10 +136,11 @@ fun UpdateScreen(
                 soup.compose.material.motion.animation.materialFadeThroughIn(
                     initialScale = 1f,
                     durationMillis = 250,
-                ) togetherWith
+                ).togetherWith(
                     soup.compose.material.motion.animation.materialFadeThroughOut(
                         durationMillis = 250,
                     )
+                )
             },
             label = "updatesContent",
             modifier = Modifier.padding(contentPadding),
@@ -153,15 +170,18 @@ fun UpdateScreen(
                         ) {
                             updatesLastUpdatedItem(lastUpdated)
 
-                            updatesUiItems(
-                                uiModels = state.uiModels,
-                                selectionMode = state.selectionMode,
-                                onUpdateSelected = onUpdateSelected,
-                                onClickCover = onClickCover,
-                                onClickUpdate = onOpenEpisode,
-                                onDownloadEpisode = onDownloadEpisode,
-                                useContainer = useContainer,
-                            )
+                        updatesUiItems(
+                            uiModels = state.uiModels,
+                            expandedState = state.expandedState,
+                            onToggleExpand = onToggleExpand,
+                            selectionMode = state.selectionMode,
+                            onUpdateSelected = onUpdateSelected,
+                            onClickCover = onClickCover,
+                            onClickUpdate = onOpenEpisode,
+                            onDownloadEpisode = onDownloadEpisode,
+                            useContainer = useContainer,
+                            usePanorama = effectivePanorama,
+                        )
                         }
                     }
                 }
@@ -180,6 +200,9 @@ private fun UpdatesAppBar(
     onInvertSelection: () -> Unit,
     onCancelActionMode: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior,
+    panoramaMode: PanoramaMode,
+    globalPanorama: Boolean,
+    onPanoramaModeChange: (PanoramaMode) -> Unit,
     navigateUp: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
@@ -187,6 +210,11 @@ private fun UpdatesAppBar(
         modifier = modifier,
         title = stringResource(MR.strings.label_recent_updates),
         actions = {
+            PanoramaModeToggle(
+                panoramaMode = panoramaMode,
+                globalPanorama = globalPanorama,
+                onPanoramaModeChange = onPanoramaModeChange,
+            )
             AppBarActions(
                 persistentListOf(
                     AppBar.Action(
@@ -280,10 +308,17 @@ private fun UpdatesBottomBar(
 
 sealed interface UpdatesUiModel {
     data class Header(val date: LocalDate) : UpdatesUiModel
-    data class Item(
-        val item: UpdatesItem,
-        val position: ItemPosition = ItemPosition.SINGLE,
+    open class Item(
+        open val item: UpdatesItem,
+        open val position: ItemPosition = ItemPosition.SINGLE,
+        open val isExpandable: Boolean = false,
     ) : UpdatesUiModel
+
+    data class Leader(
+        override val item: UpdatesItem,
+        override val position: ItemPosition = ItemPosition.SINGLE,
+        override val isExpandable: Boolean,
+    ) : Item(item, position, isExpandable)
 
     enum class ItemPosition {
         SINGLE, TOP, MIDDLE, BOTTOM

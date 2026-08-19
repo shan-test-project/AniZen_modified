@@ -37,6 +37,22 @@ class SourcePreferences(
         SetMigrateSorting.Direction.ASCENDING,
     )
 
+    // KMK -->
+    fun migrationSources() = preferenceStore.getStringSet("pref_migration_sources", emptySet())
+
+    fun migrationFlags() = preferenceStore.getInt("migration_flags", Int.MAX_VALUE)
+
+    fun migrationDeepSearchMode() = preferenceStore.getBoolean("migration_deep_search", false)
+
+    fun migrationPrioritizeByChapters() = preferenceStore.getBoolean("migration_prioritize_by_chapters", true)
+
+    fun migrationHideUnmatched() = preferenceStore.getBoolean("migration_hide_unmatched", false)
+
+    fun migrationHideWithoutUpdates() = preferenceStore.getBoolean("migration_hide_without_updates", false)
+
+    fun migrationSmartSearchSingleEntry() = preferenceStore.getBoolean("migration_smart_search_single_entry", false)
+    // KMK <--
+
     fun trustedExtensions() = preferenceStore.getStringSet(
         Preference.appStateKey("trusted_extensions"),
         emptySet(),
@@ -64,6 +80,10 @@ class SourcePreferences(
         "browse_hide_in_anime_library_items",
         false,
     )
+
+    fun hideLatest() = preferenceStore.getBoolean("browse_hide_latest", false)
+
+    fun autoSearch() = preferenceStore.getBoolean("pref_auto_search", true)
 
     // SY -->
 
@@ -99,8 +119,15 @@ class SourcePreferences(
     // Related Anime Suggestions
     fun relatedAnimeExpand() = preferenceStore.getBoolean("pref_expand_related_mangas", true)
     fun relatedAnimeShowSource() = preferenceStore.getBoolean("pref_source_related_mangas", true)
+    fun relatedAnimeShowSmart() = preferenceStore.getBoolean("pref_smart_related_mangas", false)
     fun relatedAnimeShowHome() = preferenceStore.getBoolean("pref_show_home_on_related_mangas", false)
     fun relatedAnimeInOverflow() = preferenceStore.getBoolean("put_related_mangas_in_overflow", false)
+    fun relatedAnimeDisplayMode() = preferenceStore.getObject(
+        "pref_related_mangas_display_mode",
+        LibraryDisplayMode.default,
+        LibraryDisplayMode.Serializer::serialize,
+        LibraryDisplayMode.Serializer::deserialize,
+    )
 
     enum class DataSaver {
         NONE,

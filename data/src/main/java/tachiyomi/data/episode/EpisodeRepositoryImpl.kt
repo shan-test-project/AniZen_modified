@@ -33,6 +33,8 @@ class EpisodeRepositoryImpl(
                         episode.sourceOrder,
                         episode.dateFetch,
                         episode.dateUpload,
+                        episode.summary,
+                        episode.previewUrl,
                         episode.version,
                     )
                     val lastInsertId = episodesQueries.selectLastInsertedRowId().executeAsOne()
@@ -72,6 +74,8 @@ class EpisodeRepositoryImpl(
                     sourceOrder = episodeUpdate.sourceOrder,
                     dateFetch = episodeUpdate.dateFetch,
                     dateUpload = episodeUpdate.dateUpload,
+                    summary = episodeUpdate.summary,
+                    previewUrl = episodeUpdate.previewUrl,
                     episodeId = episodeUpdate.id,
                     version = episodeUpdate.version,
                     isSyncing = 0,
@@ -103,6 +107,30 @@ class EpisodeRepositoryImpl(
     override fun getScanlatorsByAnimeIdAsFlow(animeId: Long): Flow<List<String>> {
         return handler.subscribeToList {
             episodesQueries.getScanlatorsByAnimeId(animeId) { it.orEmpty() }
+        }
+    }
+
+    override suspend fun getExcludedScanlatorsByAnimeId(animeId: Long): List<String> {
+        return handler.awaitList {
+            excluded_scanlatorsQueries.getExcludedScanlatorsByAnimeId(animeId)
+        }
+    }
+
+    override fun getExcludedScanlatorsByAnimeIdAsFlow(animeId: Long): Flow<List<String>> {
+        return handler.subscribeToList {
+            excluded_scanlatorsQueries.getExcludedScanlatorsByAnimeId(animeId)
+        }
+    }
+
+    override suspend fun insertExcludedScanlator(animeId: Long, scanlator: String) {
+        handler.await {
+            excluded_scanlatorsQueries.insert(animeId, scanlator)
+        }
+    }
+
+    override suspend fun removeExcludedScanlators(animeId: Long, scanlators: List<String>) {
+        handler.await {
+            excluded_scanlatorsQueries.remove(animeId, scanlators)
         }
     }
 

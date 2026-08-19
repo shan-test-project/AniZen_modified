@@ -17,7 +17,10 @@
 
 package eu.kanade.tachiyomi.ui.player.controls.components.panels
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.res.painterResource
+import eu.kanade.tachiyomi.R
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -76,7 +79,6 @@ import eu.kanade.tachiyomi.ui.player.applyDebandMode
 import eu.kanade.tachiyomi.ui.player.applyDebandSetting
 import eu.kanade.tachiyomi.ui.player.applyFilter
 import eu.kanade.tachiyomi.ui.player.applyTheme
-import eu.kanade.tachiyomi.ui.player.checkAndSetCopyMode
 import eu.kanade.tachiyomi.ui.player.utils.Anime4KManager
 import eu.kanade.tachiyomi.ui.player.controls.CARDS_MAX_WIDTH
 import eu.kanade.tachiyomi.ui.player.controls.panelCardsColors
@@ -94,7 +96,6 @@ fun VideoFiltersPanel(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val panelId = remember { Any().hashCode() }
     ConstraintLayout(
         modifier = modifier
             .fillMaxSize()
@@ -146,7 +147,7 @@ fun VideoFiltersPanel(
                 FilterPresetsCard()
                 FiltersCard()
                 DebandCard()
-                Anime4KCard(panelId)
+                Anime4KCard()
             }
         }
     }
@@ -157,7 +158,6 @@ fun VideoFiltersPanel(
 fun FilterPresetsCard() {
     val decoderPreferences = remember { Injekt.get<DecoderPreferences>() }
     var isExpanded by remember { mutableStateOf(false) }
-    val panelId = remember { Any().hashCode() }
 
     // Collect current values for matching
     val brightness by decoderPreferences.brightnessFilter().collectAsState()
@@ -197,7 +197,7 @@ fun FilterPresetsCard() {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 VideoFilterTheme.entries.forEach { theme ->
-                    key("presets-$panelId-${theme.name}") {
+                    key("preset-${theme.name}") {
                         InputChip(
                             selected = currentPreset == theme,
                             onClick = {
@@ -228,7 +228,6 @@ fun FilterPresetsCard() {
 fun FiltersCard() {
     val decoderPreferences = remember { Injekt.get<DecoderPreferences>() }
     var isExpanded by remember { mutableStateOf(true) }
-    val panelId = remember { Any().hashCode() }
 
     ExpandableCard(
         isExpanded = isExpanded,
@@ -242,49 +241,30 @@ fun FiltersCard() {
         colors = panelCardsColors(),
     ) {
         Column {
-            val forceCopy by decoderPreferences.forceMediaCodecCopy().collectAsState()
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = MaterialTheme.padding.medium),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = stringResource(MR.strings.player_sheets_filters_force_copy),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Switch(
-                    checked = forceCopy,
-                    onCheckedChange = {
-                        decoderPreferences.forceMediaCodecCopy().set(it)
-                        checkAndSetCopyMode(decoderPreferences)
-                    }
-                )
-            }
-
             TextButton(
                 onClick = {
                     VideoFilters.entries.forEach {
                         it.preference(decoderPreferences).delete()
                     }
-                    decoderPreferences.forceMediaCodecCopy().delete()
                     MPVLib.setPropertyString("vf", "")
                     MPVLib.setPropertyInt("brightness", 0)
                     MPVLib.setPropertyInt("contrast", 0)
                     MPVLib.setPropertyInt("saturation", 0)
                     MPVLib.setPropertyInt("gamma", 0)
                     MPVLib.setPropertyInt("hue", 0)
-                    checkAndSetCopyMode(decoderPreferences)
+                    MPVLib.setPropertyInt("sharpen", 0)
                 },
             ) {
                 Text(text = stringResource(MR.strings.action_reset))
             }
 
             VideoFilters.entries.forEach { filter ->
-                key("filters-$panelId-${filter.name}") {
+                key("filter-${filter.name}") {
                     val value by filter.preference(decoderPreferences).collectAsState()
+                    // Draw tick marks (dots) if the range is small enough (e.g. Sharpening: -20 to 20)
+                    val range = filter.max - filter.min
+                    val steps = if (range <= 40) range - 1 else 0
+
                     SliderItem(
                         label = stringResource(filter.titleRes),
                         value = value.toFloat(),
@@ -295,6 +275,7 @@ fun FiltersCard() {
                         },
                         max = filter.max.toFloat(),
                         min = filter.min.toFloat(),
+                        steps = steps,
                     )
                 }
             }
@@ -306,8 +287,7 @@ fun FiltersCard() {
 fun DebandCard() {
     val decoderPreferences = remember { Injekt.get<DecoderPreferences>() }
     val debandMode by decoderPreferences.videoDebanding().collectAsState()
-    var isExpanded by remember { mutableStateOf(false) }
-    val panelId = remember { Any().hashCode() }
+    var isExpanded by remember { mutableStateOf(true) }
 
     ExpandableCard(
         isExpanded = isExpanded,
@@ -325,55 +305,66 @@ fun DebandCard() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = MaterialTheme.padding.medium),
+                    .padding(start = MaterialTheme.padding.extraSmall, end = MaterialTheme.padding.medium),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Debanding.entries.forEach { mode ->
-                    key("deband-mode-$panelId-${mode.name}") {
-                        val isSelected = debandMode == mode
-                        IconToggleButton(
-                            checked = isSelected,
-                            onCheckedChange = {
-                                decoderPreferences.videoDebanding().set(mode)
-                                applyDebandMode(mode, decoderPreferences)
-                            }
-                        ) {
-                            val icon = when (mode) {
-                                Debanding.None -> Icons.Default.NotInterested
-                                Debanding.CPU -> Icons.Default.Memory
-                                Debanding.GPU -> Icons.Default.Gradient
-                            }
-                            Icon(icon, null)
+                    IconToggleButton(
+                        checked = debandMode == mode,
+                        onCheckedChange = {
+                            decoderPreferences.videoDebanding().set(mode)
+                            applyDebandMode(mode, decoderPreferences)
+                        }
+                    ) {
+                        when (mode) {
+                            Debanding.None -> Icon(Icons.Default.NotInterested, null)
+                            Debanding.CPU -> Icon(Icons.Default.Memory, null)
+                            Debanding.GPU -> Icon(painterResource(R.drawable.expansion_card), null)
                         }
                     }
                 }
-                Text(text = debandMode.name)
+                
+                Text(text = stringResource(debandMode.titleRes))
                 
                 Spacer(Modifier.weight(1f))
                 
                 TextButton(onClick = {
-                    decoderPreferences.videoDebanding().delete()
-                    DebandSettings.entries.forEach { it.preference(decoderPreferences).delete() }
+                    decoderPreferences.videoDebanding().set(Debanding.None)
                     applyDebandMode(Debanding.None, decoderPreferences)
+                    DebandSettings.entries.forEach { setting ->
+                        val pref = setting.preference(decoderPreferences)
+                        pref.delete()
+                        MPVLib.setPropertyInt(setting.mpvProperty, pref.get())
+                    }
                 }) {
-                    Text(stringResource(MR.strings.action_reset))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(painterResource(R.drawable.reset_iso_24px), null)
+                        Text(stringResource(MR.strings.action_reset))
+                    }
                 }
             }
 
-            DebandSettings.entries.forEach { setting ->
-                key("deband-setting-$panelId-${setting.name}") {
-                    val value by setting.preference(decoderPreferences).collectAsState()
-                    SliderItem(
-                        label = stringResource(setting.titleRes),
-                        value = value.toFloat(),
-                        valueText = value.toString(),
-                        onChange = {
-                            setting.preference(decoderPreferences).set(it.toInt())
-                            applyDebandSetting(setting, it.toInt())
-                        },
-                        max = setting.end.toFloat(),
-                        min = setting.start.toFloat(),
-                    )
+            AnimatedVisibility(visible = debandMode == Debanding.GPU) {
+                Column {
+                    DebandSettings.entries.forEach { setting ->
+                        key("deband-setting-${setting.name}") {
+                            val value by setting.preference(decoderPreferences).collectAsState()
+                            SliderItem(
+                                label = stringResource(setting.titleRes),
+                                value = value,
+                                valueText = value.toString(),
+                                onChange = {
+                                    setting.preference(decoderPreferences).set(it)
+                                    applyDebandSetting(setting, it)
+                                },
+                                max = setting.end,
+                                min = setting.start,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -381,7 +372,7 @@ fun DebandCard() {
 }
 
 @Composable
-fun Anime4KCard(panelId: Int = 0) {
+fun Anime4KCard() {
     val decoderPreferences = remember { Injekt.get<DecoderPreferences>() }
     val anime4kManager = remember { Injekt.get<Anime4KManager>() }
     val enableAnime4K by decoderPreferences.enableAnime4K().collectAsState()
@@ -435,7 +426,7 @@ fun Anime4KCard(panelId: Int = 0) {
                 ) {
                     itemsIndexed(
                         items = Anime4KManager.Mode.entries,
-                        key = { index, it -> "anime4k-$panelId-mode-$index-${it.name}" }
+                        key = { index, it -> "a4k-m-$index-${it.name}" }
                     ) { _, mode ->
                         if (mode == Anime4KManager.Mode.OFF) return@itemsIndexed
                         InputChip(
@@ -458,7 +449,7 @@ fun Anime4KCard(panelId: Int = 0) {
                 ) {
                     itemsIndexed(
                         items = Anime4KManager.Quality.entries,
-                        key = { index, it -> "anime4k-$panelId-quality-$index-${it.name}" }
+                        key = { index, it -> "a4k-q-$index-${it.name}" }
                     ) { _, quality ->
                         val label = when (quality) {
                             Anime4KManager.Quality.FAST -> stringResource(MR.strings.anime4k_quality_fast)

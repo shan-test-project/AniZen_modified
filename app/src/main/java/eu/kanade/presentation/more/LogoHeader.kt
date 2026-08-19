@@ -11,12 +11,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.LocalLibrary
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -44,64 +45,17 @@ import androidx.compose.foundation.shape.CircleShape
 
 @Composable
 fun LogoHeader() {
-    val context = LocalContext.current
-    val haptic = LocalHapticFeedback.current
-    val aiPreferences = remember { Injekt.get<AiPreferences>() }
-    val displayName by aiPreferences.displayName().collectAsState()
-    val profilePhotoUri by aiPreferences.profilePhotoUri().collectAsState()
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                .padding(4.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable {
-                    context.toast("User: $displayName")
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            if (profilePhotoUri.isNotEmpty()) {
-                AsyncImage(
-                    model = profilePhotoUri,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    painter = painterResource(R.drawable.ic_launcher_monochrome),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = displayName,
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 24.sp,
-                letterSpacing = 0.5.sp
-            ),
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            text = "AniZen v${BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-            ),
-            modifier = Modifier.secondaryItemAlpha()
+        Icon(
+            painter = painterResource(R.drawable.ic_splash_logo_raw),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(100.dp)
         )
     }
 }

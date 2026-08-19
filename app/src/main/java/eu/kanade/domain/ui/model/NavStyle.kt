@@ -49,9 +49,6 @@ enum class NavStyle(
         val tabs = mutableListOf<Tab>(
             LibraryTab,
         )
-        if (uiPreferences.showFeedInNavigationBar().get()) {
-            tabs.add(FeedTab)
-        }
         tabs.addAll(
             listOf(
                 UpdatesTab,

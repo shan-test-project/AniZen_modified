@@ -1,8 +1,10 @@
 package eu.kanade.tachiyomi.util.system
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -21,6 +23,18 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import java.io.File
+
+/**
+ * Safely find the Activity associated with this Context.
+ */
+fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
+}
 
 /**
  * Copies a string to clipboard
@@ -65,16 +79,25 @@ fun Context.openInBrowser(url: String, forceDefaultBrowser: Boolean = false) {
 }
 
 fun Context.openInBrowser(uri: Uri, forceDefaultBrowser: Boolean = false) {
-    try {
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            // Force default browser so that verified extensions don't re-open Tachiyomi
-            if (forceDefaultBrowser) {
-                defaultBrowserPackageName()?.let { setPackage(it) }
-            }
+    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        // Force default browser so that verified extensions don't re-open Tachiyomi
+        if (forceDefaultBrowser) {
+            defaultBrowserPackageName()?.let { setPackage(it) }
         }
+    }
+    try {
         startActivity(intent)
     } catch (e: Exception) {
-        toast(e.message)
+        if (intent.getPackage() != null) {
+            intent.setPackage(null)
+            try {
+                startActivity(intent)
+            } catch (e2: Exception) {
+                toast(e2.message)
+            }
+        } else {
+            toast(e.message)
+        }
     }
 }
 

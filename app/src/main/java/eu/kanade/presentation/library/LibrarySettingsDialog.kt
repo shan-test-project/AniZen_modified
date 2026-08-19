@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -43,14 +44,17 @@ import eu.kanade.tachiyomi.ui.library.LibrarySettingsScreenModel
 import eu.kanade.tachiyomi.util.system.isReleaseBuildType
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.core.common.preference.TriState
+import tachiyomi.core.common.preference.toggle
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibraryDisplayMode
+import eu.kanade.domain.ui.model.PanoramaMode
 import tachiyomi.domain.library.model.LibraryGroup
 import tachiyomi.domain.library.model.LibrarySort
 import tachiyomi.domain.library.model.sort
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.ank.AMR
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.components.BaseSortItem
 import tachiyomi.presentation.core.components.CheckboxItem
@@ -62,7 +66,9 @@ import tachiyomi.presentation.core.components.SortItem
 import tachiyomi.presentation.core.components.TriStateItem
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
-import tachiyomi.presentation.core.util.collectAsState
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import tachiyomi.presentation.core.components.material.padding
 
 @Composable
@@ -116,9 +122,9 @@ fun LibrarySettingsDialog(
 private fun ColumnScope.FilterPage(
     screenModel: LibrarySettingsScreenModel,
 ) {
-    val filterDownloaded by screenModel.libraryPreferences.filterDownloaded().collectAsState()
-    val downloadedOnly by screenModel.preferences.downloadedOnly().collectAsState()
-    val autoUpdateAnimeRestrictions by screenModel.libraryPreferences.autoUpdateAnimeRestrictions().collectAsState()
+    val filterDownloaded by screenModel.libraryPreferences.filterDownloaded().collectAsStatePref()
+    val downloadedOnly by screenModel.preferences.downloadedOnly().collectAsStatePref()
+    val autoUpdateAnimeRestrictions by screenModel.libraryPreferences.autoUpdateAnimeRestrictions.collectAsStatePref()
 
     TriStateItem(
         label = stringResource(MR.strings.label_downloaded),
@@ -130,33 +136,49 @@ private fun ColumnScope.FilterPage(
         enabled = !downloadedOnly,
         onClick = { screenModel.toggleFilter(LibraryPreferences::filterDownloaded) },
     )
-    val filterUnseen by screenModel.libraryPreferences.filterUnseen().collectAsState()
+    val filterUnseen by screenModel.libraryPreferences.filterUnseen().collectAsStatePref()
     TriStateItem(
         label = stringResource(MR.strings.action_filter_unseen),
         state = filterUnseen,
         onClick = { screenModel.toggleFilter(LibraryPreferences::filterUnseen) },
     )
-    val filterStarted by screenModel.libraryPreferences.filterStarted().collectAsState()
+    val filterStarted by screenModel.libraryPreferences.filterStarted().collectAsStatePref()
     TriStateItem(
         label = stringResource(MR.strings.label_started),
         state = filterStarted,
         onClick = { screenModel.toggleFilter(LibraryPreferences::filterStarted) },
     )
-    val filterBookmarked by screenModel.libraryPreferences.filterBookmarked().collectAsState()
+    val filterBookmarked by screenModel.libraryPreferences.filterBookmarked().collectAsStatePref()
     TriStateItem(
         label = stringResource(MR.strings.action_filter_bookmarked),
         state = filterBookmarked,
         onClick = { screenModel.toggleFilter(LibraryPreferences::filterBookmarked) },
     )
-    val filterCompleted by screenModel.libraryPreferences.filterCompleted().collectAsState()
+    val filterCompleted by screenModel.libraryPreferences.filterCompleted().collectAsStatePref()
     TriStateItem(
         label = stringResource(MR.strings.completed),
         state = filterCompleted,
         onClick = { screenModel.toggleFilter(LibraryPreferences::filterCompleted) },
     )
+    // SY -->
+    val filterLewd by screenModel.libraryPreferences.filterLewd().collectAsStatePref()
+    TriStateItem(
+        label = stringResource(SYMR.strings.lewd),
+        state = filterLewd,
+        onClick = { screenModel.toggleFilter(LibraryPreferences::filterLewd) },
+    )
+    // SY <--
+    // KMK -->
+    val filterCategories by screenModel.libraryPreferences.filterCategories().collectAsStatePref()
+    CheckboxItem(
+        label = stringResource(MR.strings.action_filter_categories),
+        checked = filterCategories,
+        onClick = { screenModel.libraryPreferences.filterCategories().toggle() },
+    )
+    // KMK <--
     // TODO: re-enable when custom intervals are ready for stable
     if ((!isReleaseBuildType) && LibraryPreferences.ANIME_OUTSIDE_RELEASE_PERIOD in autoUpdateAnimeRestrictions) {
-        val filterIntervalCustom by screenModel.libraryPreferences.filterIntervalCustom().collectAsState()
+        val filterIntervalCustom by screenModel.libraryPreferences.filterIntervalCustom().collectAsStatePref()
         TriStateItem(
             label = stringResource(MR.strings.action_filter_interval_custom),
             state = filterIntervalCustom,
@@ -171,7 +193,7 @@ private fun ColumnScope.FilterPage(
         }
         1 -> {
             val service = trackers[0]
-            val filterTracker by screenModel.libraryPreferences.filterTracking(service.id.toInt()).collectAsState()
+            val filterTracker by screenModel.libraryPreferences.filterTracking(service.id.toInt()).collectAsStatePref()
             TriStateItem(
                 label = stringResource(MR.strings.action_filter_tracked),
                 state = filterTracker,
@@ -181,7 +203,7 @@ private fun ColumnScope.FilterPage(
         else -> {
             HeadingItem(MR.strings.action_filter_tracked)
             trackers.map { service ->
-                val filterTracker by screenModel.libraryPreferences.filterTracking(service.id.toInt()).collectAsState()
+                val filterTracker by screenModel.libraryPreferences.filterTracking(service.id.toInt()).collectAsStatePref()
                 TriStateItem(
                     label = service.name,
                     state = filterTracker,
@@ -199,17 +221,18 @@ private fun ColumnScope.SortPage(
 ) {
     val trackers by screenModel.trackersFlow.collectAsState()
     // SY -->
-    val globalSortMode by screenModel.libraryPreferences.sortingMode().collectAsState()
-    val sortingMode = if (screenModel.grouping == LibraryGroup.BY_DEFAULT) {
+    val globalSortMode by screenModel.libraryPreferences.sortingMode().collectAsStatePref()
+    val sortingMode = if (screenModel.grouping == LibraryGroup.BY_DEFAULT && category != null) {
         category.sort.type
     } else {
         globalSortMode.type
     }
-    val sortDescending = if (screenModel.grouping == LibraryGroup.BY_DEFAULT) {
+    val isAscending = if (screenModel.grouping == LibraryGroup.BY_DEFAULT && category != null) {
         category.sort.isAscending
     } else {
         globalSortMode.isAscending
-    }.not()
+    }
+    val sortDescending = !isAscending
     // SY <--
 
     val options = remember(trackers.isEmpty()) {
@@ -279,13 +302,26 @@ private val displayModes = listOf(
 private fun ColumnScope.DisplayPage(
     screenModel: LibrarySettingsScreenModel,
 ) {
-    val displayMode by screenModel.libraryPreferences.displayMode().collectAsState()
+    val displayMode by screenModel.libraryPreferences.displayMode().collectAsStatePref() as androidx.compose.runtime.State<LibraryDisplayMode>
+    val uiPreferences = remember { Injekt.get<eu.kanade.domain.ui.UiPreferences>() }
+    val panoramaMode by uiPreferences.libraryPanoramaMode().collectAsStatePref()
+    
     SettingsChipRow(MR.strings.action_display_mode) {
         displayModes.map { (titleRes, mode) ->
             FilterChip(
                 selected = displayMode == mode,
                 onClick = { screenModel.setDisplayMode(mode) },
                 label = { Text(stringResource(titleRes)) },
+            )
+        }
+    }
+    
+    SettingsChipRow(KMR.strings.pref_panorama_cover) {
+        PanoramaMode.entries.map { mode ->
+            FilterChip(
+                selected = panoramaMode == mode,
+                onClick = { uiPreferences.libraryPanoramaMode().set(mode) },
+                label = { Text(stringResource(mode.getLabelRes())) },
             )
         }
     }
@@ -299,7 +335,7 @@ private fun ColumnScope.DisplayPage(
         }
     }
 
-    val columns by columnPreference.collectAsState()
+    val columns by columnPreference.collectAsStatePref()
     val isList = displayMode == LibraryDisplayMode.List
     HeadingItem(if (isList) MR.strings.pref_library_rows else MR.strings.pref_library_columns)
     
@@ -337,6 +373,14 @@ private fun ColumnScope.DisplayPage(
         pref = screenModel.libraryPreferences.languageBadge(),
     )
     CheckboxItem(
+        label = stringResource(KMR.strings.action_display_language_icon),
+        pref = screenModel.libraryPreferences.showLanguageIcon(),
+    )
+    CheckboxItem(
+        label = stringResource(KMR.strings.action_display_source_badge),
+        pref = screenModel.libraryPreferences.showSourceIcon(),
+    )
+    CheckboxItem(
         label = stringResource(AMR.strings.action_display_show_continue_watching_button),
         pref = screenModel.libraryPreferences.showContinueWatchingButton(),
     )
@@ -350,13 +394,11 @@ private fun ColumnScope.DisplayPage(
         label = stringResource(MR.strings.action_display_show_number_of_items),
         pref = screenModel.libraryPreferences.categoryNumberOfItems(),
     )
+    CheckboxItem(
+        label = stringResource(MR.strings.action_display_show_hidden_categories),
+        pref = screenModel.libraryPreferences.showHiddenCategories(),
+    )
 }
-
-data class GroupMode(
-    val int: Int,
-    val nameRes: Int,
-    val drawableRes: Int,
-)
 
 private fun groupTypeDrawableRes(type: Int): Int {
     return when (type) {
@@ -407,4 +449,10 @@ private fun ColumnScope.GroupPage(
         )
     }
 }
+
+data class GroupMode(
+    val int: Int,
+    val nameRes: Int,
+    val drawableRes: Int,
+)
 // SY <--

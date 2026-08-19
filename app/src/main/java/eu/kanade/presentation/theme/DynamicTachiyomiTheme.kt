@@ -6,12 +6,15 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.google.android.material.color.utilities.Hct
 import com.google.android.material.color.utilities.MaterialDynamicColors
 import com.google.android.material.color.utilities.SchemeContent
 import eu.kanade.domain.ui.UiPreferences
+import eu.kanade.presentation.theme.TachiyomiShapes
+import eu.kanade.presentation.theme.TachiyomiTypography
 import eu.kanade.presentation.theme.colorscheme.MonetColorScheme
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
@@ -22,17 +25,19 @@ fun DynamicTachiyomiTheme(
     animate: Boolean = true,
     colorSeed: Int? = null,
     contrast: Double = 0.0,
+    enabled: Boolean = Injekt.get<UiPreferences>().dynamicAnimeTheme().collectAsState().value,
     content: @Composable () -> Unit,
 ) {
     val uiPreferences = Injekt.get<UiPreferences>()
     val isAmoled by uiPreferences.themeDarkAmoled().collectAsState()
     val isDark = isSystemInDarkTheme()
-    val isDynamicEnabled by uiPreferences.dynamicMangaTheme().collectAsState()
 
-    if (colorSeed != null && isDynamicEnabled) {
+    if (colorSeed != null && enabled) {
         val colorScheme = rememberDynamicColorScheme(colorSeed, isDark, isAmoled, contrast)
         MaterialTheme(
             colorScheme = colorScheme,
+            shapes = TachiyomiShapes,
+            typography = TachiyomiTypography,
             content = content,
         )
     } else {
@@ -48,20 +53,24 @@ private fun rememberDynamicColorScheme(
     isAmoled: Boolean,
     contrast: Double,
 ): ColorScheme {
-    val colorScheme = generateColorSchemeFromSeed(seed, isDark, contrast)
-    if (isDark && isAmoled) {
-        return colorScheme.copy(
-            background = Color.Black,
-            onBackground = Color.White,
-            surface = Color.Black,
-            onSurface = Color.White,
-            surfaceVariant = Color(0xFF0C0C0C),
-            surfaceContainerLowest = Color(0xFF0C0C0C),
-            surfaceContainerLow = Color(0xFF0C0C0C),
-            surfaceContainer = Color(0xFF0C0C0C),
-            surfaceContainerHigh = Color(0xFF131313),
-            surfaceContainerHighest = Color(0xFF1B1B1B),
-        )
+    val colorScheme = remember(seed, isDark, isAmoled, contrast) {
+        val scheme = generateColorSchemeFromSeed(seed, isDark, contrast)
+        if (isDark && isAmoled) {
+            scheme.copy(
+                background = Color.Black,
+                onBackground = Color.White,
+                surface = Color.Black,
+                onSurface = Color.White,
+                surfaceVariant = Color(0xFF0C0C0C),
+                surfaceContainerLowest = Color(0xFF0C0C0C),
+                surfaceContainerLow = Color(0xFF0C0C0C),
+                surfaceContainer = Color(0xFF0C0C0C),
+                surfaceContainerHigh = Color(0xFF131313),
+                surfaceContainerHighest = Color(0xFF1B1B1B),
+            )
+        } else {
+            scheme
+        }
     }
     return colorScheme
 }

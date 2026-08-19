@@ -1,10 +1,10 @@
 package eu.kanade.tachiyomi.ui.home
 
-import androidx.compose.animation.graphics.ExperimentalAnimationGraphicsApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
@@ -18,6 +18,7 @@ import tachiyomi.presentation.core.components.material.Scaffold
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.IconButton
 
 import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import eu.kanade.tachiyomi.ui.browse.BrowseTab
@@ -26,7 +27,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import eu.kanade.domain.ui.UiPreferences
-import androidx.compose.runtime.collectAsState
+import eu.kanade.domain.ui.model.PanoramaMode
+import eu.kanade.presentation.components.PanoramaModeToggle
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
 import androidx.compose.runtime.getValue
 
 fun feedTab(): Tab = FeedTab
@@ -34,10 +37,9 @@ fun feedTab(): Tab = FeedTab
 data object FeedTab : Tab {
 
     override fun isEnabled(): Boolean {
-        return Injekt.get<UiPreferences>().enableFeed().get()
+        return true
     }
 
-    @OptIn(ExperimentalAnimationGraphicsApi::class)
     override val options: TabOptions
         @Composable
         get() {
@@ -45,21 +47,33 @@ data object FeedTab : Tab {
             return TabOptions(
                 index = 1u,
                 title = stringResource(title),
-                icon = painterResource(R.drawable.ic_browse_filled_24dp),
+                icon = painterResource(R.drawable.ic_dynamic_feed_24dp),
             )
         }
 
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        val uiPreferences = remember { Injekt.get<UiPreferences>() }
+        val globalPanorama by uiPreferences.panoramaCover().collectAsStatePref() as androidx.compose.runtime.State<Boolean>
+        val feedMode by uiPreferences.feedPanoramaMode().collectAsStatePref() as androidx.compose.runtime.State<PanoramaMode>
+        val effectivePanorama = remember(globalPanorama, feedMode) { feedMode.resolve(globalPanorama) }
+
         Scaffold(
             topBar = {
                 eu.kanade.presentation.components.AppBar(
                     title = stringResource(SYMR.strings.feed),
                     actions = {
-                        androidx.compose.material3.IconButton(onClick = { navigator.push(FeedManageScreen()) }) {
+                        PanoramaModeToggle(
+                            panoramaMode = feedMode,
+                            globalPanorama = globalPanorama,
+                            onPanoramaModeChange = { next ->
+                                uiPreferences.feedPanoramaMode().set(next)
+                            },
+                        )
+                        IconButton(onClick = { navigator.push(FeedManageScreen()) }) {
                             Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Outlined.Settings,
+                                imageVector = Icons.Outlined.Settings,
                                 contentDescription = "Edit Feed",
                             )
                         }
@@ -67,12 +81,12 @@ data object FeedTab : Tab {
                 )
             }
         ) { contentPadding ->
-            Content(contentPadding)
+            Content(contentPadding, effectivePanorama)
         }
     }
 
     @Composable
-    fun Content(contentPadding: PaddingValues) {
+    fun Content(contentPadding: PaddingValues, usePanorama: Boolean) {
         val navigator = LocalNavigator.currentOrThrow
         val tabNavigator = LocalTabNavigator.current
         val scope = rememberCoroutineScope()
@@ -90,7 +104,29 @@ data object FeedTab : Tab {
                     // BrowseTab is already at index 0 (sourcesTab)
                 }
             },
+            onSeeAllClick = { item ->
+                val type = tachiyomi.domain.source.model.FeedSavedSearch.Type.from(item.feed.type)
+                val screen = when (type) {
+                    tachiyomi.domain.source.model.FeedSavedSearch.Type.Latest ->
+                        eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen(
+                            sourceId = item.source.id,
+                            listingQuery = tachiyomi.domain.source.interactor.GetRemoteAnime.QUERY_LATEST,
+                        )
+                    tachiyomi.domain.source.model.FeedSavedSearch.Type.Popular ->
+                        eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen(
+                            sourceId = item.source.id,
+                            listingQuery = tachiyomi.domain.source.interactor.GetRemoteAnime.QUERY_POPULAR,
+                        )
+                    tachiyomi.domain.source.model.FeedSavedSearch.Type.SavedSearch ->
+                        eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen(
+                            sourceId = item.source.id,
+                            savedSearchId = item.savedSearch?.id,
+                        )
+                }
+                navigator.push(screen)
+            },
             contentPadding = contentPadding,
+            usePanorama = usePanorama,
         )
     }
 }

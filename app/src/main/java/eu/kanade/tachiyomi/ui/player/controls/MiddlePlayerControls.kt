@@ -10,7 +10,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -46,6 +48,7 @@ fun MiddlePlayerControls(
     onSkipPrevious: () -> Unit,
 
     // middle
+    isStopped: Boolean,
     isLoading: Boolean,
     isLoadingEpisode: Boolean,
     controlsShown: Boolean,
@@ -86,6 +89,9 @@ fun MiddlePlayerControls(
         val icon = AnimatedImageVector.animatedVectorResource(R.drawable.anim_play_to_pause)
         val interaction = remember { MutableInteractionSource() }
         when {
+            isStopped -> {
+                Spacer(Modifier.size(96.dp))
+            }
             gestureSeekAmount != null -> {
                 Text(
                     stringResource(
@@ -102,26 +108,34 @@ fun MiddlePlayerControls(
                 )
             }
 
-            (isLoading || isLoadingEpisode) && showLoadingCircle -> CircularProgressIndicator(Modifier.size(96.dp))
             else -> {
-                AnimatedVisibility(
-                    visible = controlsShown && !areControlsLocked,
-                    enter = enter,
-                    exit = exit,
+                Box(
+                    modifier = Modifier.size(96.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Image(
-                        painter = rememberAnimatedVectorPainter(icon, !paused),
-                        modifier = Modifier
-                            .size(96.dp)
-                            .clip(CircleShape)
-                            .clickable(
-                                interaction,
-                                ripple(),
-                                onClick = onPlayPauseClick,
-                            )
-                            .padding(MaterialTheme.padding.medium),
-                        contentDescription = null,
-                    )
+                    val showLoading = (isLoading || isLoadingEpisode) && showLoadingCircle
+                    if (showLoading) {
+                        CircularProgressIndicator(Modifier.size(96.dp))
+                    }
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = controlsShown && !areControlsLocked && !showLoading,
+                        enter = enter,
+                        exit = exit,
+                    ) {
+                        Image(
+                            painter = rememberAnimatedVectorPainter(icon, !paused),
+                            modifier = Modifier
+                                .size(96.dp)
+                                .clip(CircleShape)
+                                .clickable(
+                                    interaction,
+                                    ripple(),
+                                    onClick = onPlayPauseClick,
+                                )
+                                .padding(MaterialTheme.padding.medium),
+                            contentDescription = null,
+                        )
+                    }
                 }
             }
         }

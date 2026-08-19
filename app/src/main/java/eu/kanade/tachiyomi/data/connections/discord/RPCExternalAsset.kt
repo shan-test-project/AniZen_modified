@@ -30,15 +30,26 @@ class RPCExternalAsset(
     )
 
     private val api = "https://discord.com/api/v9/applications/$applicationId/external-assets"
+
+    companion object {
+        private val cache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    }
+
     suspend fun getDiscordUri(imageUrl: String): String? {
-        if (imageUrl.startsWith("mp:")) return imageUrl
+        if (imageUrl.isBlank() || imageUrl.startsWith("mp:")) return imageUrl.takeIf { it.isNotBlank() }
+        cache[imageUrl]?.let { return it }
+
         val request = Request.Builder().url(api).header("Authorization", token)
             .post("{\"urls\":[\"$imageUrl\"]}".toRequestBody("application/json".toMediaType()))
             .build()
         return runCatching {
             val res = client.newCall(request).await()
-            json.decodeFromString<List<ExternalAsset>>(res.body.string())
-                .firstOrNull()?.externalAssetPath?.let { "mp:$it" }
+            res.use { response ->
+                if (!response.isSuccessful) return@runCatching null
+                json.decodeFromString<List<ExternalAsset>>(response.body.string())
+                    .firstOrNull()?.externalAssetPath?.let { "mp:$it" }
+                    ?.also { cache[imageUrl] = it }
+            }
         }.getOrNull()
     }
 

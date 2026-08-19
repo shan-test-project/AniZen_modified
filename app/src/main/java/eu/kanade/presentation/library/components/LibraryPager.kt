@@ -14,6 +14,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import eu.kanade.domain.ui.UiPreferences
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -30,6 +34,7 @@ import tachiyomi.presentation.core.util.plus
 @Composable
 fun LibraryPager(
     state: PagerState,
+    categories: ImmutableList<tachiyomi.domain.category.model.Category>,
     contentPadding: PaddingValues,
     hasActiveFilters: Boolean,
     selectedAnime: ImmutableList<LibraryAnime>,
@@ -37,22 +42,30 @@ fun LibraryPager(
     onGlobalSearchClicked: () -> Unit,
     getDisplayMode: (Int) -> PreferenceMutableState<LibraryDisplayMode>,
     getColumnsForOrientation: (Boolean) -> PreferenceMutableState<Int>,
-    getLibraryForPage: (Int) -> ImmutableList<LibraryItem>,
+    getLibraryForPage: (Int) -> ImmutableList<eu.kanade.tachiyomi.ui.library.LibraryDisplayItem>,
     onClickAnime: (LibraryAnime) -> Unit,
-    onLongClickAnime: (LibraryAnime) -> Unit,
+    onLongClickAnime: (LibraryAnime, Long) -> Unit,
     onClickContinueWatching: ((LibraryAnime) -> Unit)?,
-) {
+    onFolderClick: ((eu.kanade.tachiyomi.ui.library.LibraryDisplayItem.Folder) -> Unit)? = null,
+    onFolderLongClick: ((eu.kanade.tachiyomi.ui.library.LibraryDisplayItem.Folder) -> Unit)? = null,
+    ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val columns by remember(isLandscape) { getColumnsForOrientation(isLandscape) }
+
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val globalPanorama by uiPreferences.panoramaCover().collectAsStatePref()
+    val libraryMode by uiPreferences.libraryPanoramaMode().collectAsStatePref()
+    val effectivePanorama = remember(globalPanorama, libraryMode) { libraryMode.resolve(globalPanorama) }
 
     val content: @Composable (Int) -> Unit = { containerHeight ->
         HorizontalPager(
             modifier = Modifier.fillMaxSize(),
             state = state,
+            key = { categories.getOrNull(it)?.id ?: it.toLong() },
             verticalAlignment = Alignment.Top,
-            beyondViewportPageCount = 1,
         ) { page ->
+            val category = categories.getOrNull(page) ?: return@HorizontalPager
             val library = getLibraryForPage(page)
 
             if (library.isEmpty()) {
@@ -72,14 +85,17 @@ fun LibraryPager(
                     LibraryList(
                         items = library,
                         entries = columns,
-                        containerHeight = containerHeight,
+                        containerHeight = 0,
                         contentPadding = contentPadding,
                         selection = selectedAnime,
                         onClick = onClickAnime,
                         onClickContinueWatching = onClickContinueWatching,
-                        onLongClick = onLongClickAnime,
+                        onLongClick = { onLongClickAnime(it, category.id) },
                         searchQuery = searchQuery,
                         onGlobalSearchClicked = onGlobalSearchClicked,
+                        usePanorama = effectivePanorama,
+                        onFolderClick = onFolderClick,
+                        onFolderLongClick = onFolderLongClick,
                     )
                 }
                 LibraryDisplayMode.CompactGrid, LibraryDisplayMode.CoverOnlyGrid -> {
@@ -91,9 +107,12 @@ fun LibraryPager(
                         selection = selectedAnime,
                         onClick = onClickAnime,
                         onClickContinueWatching = onClickContinueWatching,
-                        onLongClick = onLongClickAnime,
+                        onLongClick = { onLongClickAnime(it, category.id) },
                         searchQuery = searchQuery,
                         onGlobalSearchClicked = onGlobalSearchClicked,
+                        usePanorama = effectivePanorama,
+                        onFolderClick = onFolderClick,
+                        onFolderLongClick = onFolderLongClick,
                     )
                 }
                 LibraryDisplayMode.ComfortableGrid -> {
@@ -103,10 +122,13 @@ fun LibraryPager(
                         contentPadding = contentPadding,
                         selection = selectedAnime,
                         onClick = onClickAnime,
-                        onLongClick = onLongClickAnime,
+                        onLongClick = { onLongClickAnime(it, category.id) },
                         onClickContinueWatching = onClickContinueWatching,
                         searchQuery = searchQuery,
                         onGlobalSearchClicked = onGlobalSearchClicked,
+                        usePanorama = effectivePanorama,
+                        onFolderClick = onFolderClick,
+                        onFolderLongClick = onFolderLongClick,
                     )
                 }
                 else -> {}
@@ -114,13 +136,7 @@ fun LibraryPager(
         }
     }
 
-    if (columns > 0) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            content(constraints.maxHeight)
-        }
-    } else {
-        content(0)
-    }
+    content(0)
 }
 @Composable
 private fun LibraryPagerEmptyScreen(

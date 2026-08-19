@@ -94,13 +94,7 @@ class CastManager(
     private val _castState = MutableStateFlow(CastState.DISCONNECTED)
     val castState: StateFlow<CastState> = _castState.asStateFlow()
 
-    private var _castContext: CastContext? = null
-    private val castContext: CastContext?
-        get() {
-            if (_castContext == null) initializeCast()
-            return _castContext
-        }
-
+    private var castContext: CastContext? = null
     var castSession: CastSession? = null
     private var sessionListener: CastSessionListener? = null
     private var castProgressJob: Job? = null
@@ -136,32 +130,49 @@ class CastManager(
     val volume: StateFlow<Float> = _volume.asStateFlow()
 
     init {
-        // Optimization: Do not initialize CastContext here as it blocks the UI thread.
-        // It will be initialized on first use or in startDeviceDiscovery/reconnect.
+        initializeCast()
     }
 
-    @Synchronized
-    private fun initializeCast() {
-        if (_castContext != null || !isCastApiAvailable) return
+    private fun initializeCast(onComplete: ((CastContext?) -> Unit)? = null) {
+        if (!playerPreferences.enableCast().get() || !isCastApiAvailable) {
+            onComplete?.invoke(null)
+            return
+        }
+        if (castContext != null) {
+            onComplete?.invoke(castContext)
+            return
+        }
         try {
-            _castContext = CastContext.getSharedInstance(context.applicationContext)
-            sessionListener = CastSessionListener(this)
-            registerSessionListener()
+            CastContext.getSharedInstance(context.applicationContext, java.util.concurrent.Executors.newSingleThreadExecutor())
+                .addOnCompleteListener { task ->
+                    activity.lifecycleScope.launch {
+                        if (task.isSuccessful) {
+                            castContext = task.result
+                            sessionListener = CastSessionListener(this@CastManager)
+                            registerSessionListener()
+                            onComplete?.invoke(castContext)
+                        } else {
+                            logcat(LogPriority.ERROR) { "Failed to initialize CastContext: ${task.exception?.message}" }
+                            onComplete?.invoke(null)
+                        }
+                    }
+                }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
+            onComplete?.invoke(null)
         }
     }
 
     // Session Management
     fun registerSessionListener() {
         sessionListener?.let { listener ->
-            _castContext?.sessionManager?.addSessionManagerListener(listener, CastSession::class.java)
+            castContext?.sessionManager?.addSessionManagerListener(listener, CastSession::class.java)
         }
     }
 
     fun unregisterSessionListener() {
         sessionListener?.let { listener ->
-            _castContext?.sessionManager?.removeSessionManagerListener(listener, CastSession::class.java)
+            castContext?.sessionManager?.removeSessionManagerListener(listener, CastSession::class.java)
         }
     }
 
@@ -360,48 +371,52 @@ class CastManager(
     }
 
     fun reconnect() {
-        if (!isCastApiAvailable) return
-        try {
-            castSession = castContext?.sessionManager?.currentCastSession
-            if (castSession?.isConnected == true) {
-                updateCastState(CastState.CONNECTED)
-                startTrackingCastProgress()
-                updateQueueItems()
-                updateCurrentMedia()
+        if (!playerPreferences.enableCast().get() || !isCastApiAvailable) return
+        initializeCast { ctx ->
+            if (ctx == null) return@initializeCast
+            try {
+                castSession = ctx.sessionManager.currentCastSession
+                if (castSession?.isConnected == true) {
+                    updateCastState(CastState.CONNECTED)
+                    startTrackingCastProgress()
+                    updateQueueItems()
+                    updateCurrentMedia()
 
-                castSession?.remoteMediaClient?.registerCallback(
-                    object : RemoteMediaClient.Callback() {
-                        override fun onStatusUpdated() {
-                            updateCurrentMedia()
-                            updateQueueItems()
-                        }
+                    castSession?.remoteMediaClient?.registerCallback(
+                        object : RemoteMediaClient.Callback() {
+                            override fun onStatusUpdated() {
+                                updateCurrentMedia()
+                                updateQueueItems()
+                            }
 
-                        override fun onQueueStatusUpdated() {
-                            updateQueueItems()
-                        }
+                            override fun onQueueStatusUpdated() {
+                                updateQueueItems()
+                            }
 
-                        override fun onPreloadStatusUpdated() {
-                            updateQueueItems()
-                        }
-                    },
-                )
+                            override fun onPreloadStatusUpdated() {
+                                updateQueueItems()
+                            }
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e)
             }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e)
         }
     }
 
     fun startDeviceDiscovery() {
-        if (!isCastApiAvailable) return
+        if (!playerPreferences.enableCast().get() || !isCastApiAvailable) return
         discoveryRetryJob?.cancel()
 
-        try {
-            castContext?.let { castContext ->
+        initializeCast { ctx ->
+            if (ctx == null) return@initializeCast
+            try {
                 if (_castState.value != CastState.CONNECTED) {
                     _castState.value = CastState.CONNECTING
                 }
 
-                val currentSession = castContext.sessionManager.currentCastSession
+                val currentSession = ctx.sessionManager.currentCastSession
                 val selector = androidx.mediarouter.media.MediaRouteSelector.Builder()
                     .addControlCategory(androidx.mediarouter.media.MediaControlIntent.CATEGORY_LIVE_VIDEO)
                     .addControlCategory(androidx.mediarouter.media.MediaControlIntent.CATEGORY_REMOTE_PLAYBACK)
@@ -453,11 +468,11 @@ class CastManager(
                 }
 
                 updateDevicesList(currentSession)
-            }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR) { "Error in startDeviceDiscovery: ${e.message}" }
-            if (_castState.value != CastState.CONNECTED) {
-                _castState.value = CastState.DISCONNECTED
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR) { "Error in startDeviceDiscovery: ${e.message}" }
+                if (_castState.value != CastState.CONNECTED) {
+                    _castState.value = CastState.DISCONNECTED
+                }
             }
         }
     }
@@ -503,12 +518,12 @@ class CastManager(
                     mediaRouter.selectRoute(route)
 
                     var attempts = 0
-                    while (attempts < 5) {
+                    while (attempts < 3) {
                         if (castSession?.isConnected == true) {
                             _castState.value = CastState.CONNECTED
                             return@launch
                         }
-                        delay(15000)
+                        delay(5000)
                         attempts++
                     }
 
@@ -616,7 +631,7 @@ class CastManager(
     }
 
     fun endSession() {
-        val mSessionManager = castContext!!.sessionManager
+        val mSessionManager = castContext?.sessionManager ?: return
         mSessionManager.endCurrentSession(true)
         reset()
         _castState.value = CastState.DISCONNECTED

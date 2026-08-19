@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -66,11 +67,14 @@ import eu.kanade.presentation.components.AppStateBanners
 import eu.kanade.presentation.components.DownloadedOnlyBannerBackgroundColor
 import eu.kanade.presentation.components.IncognitoModeBannerBackgroundColor
 import eu.kanade.presentation.components.IndexingBannerBackgroundColor
+import eu.kanade.presentation.more.settings.screen.NavigationSettingsScreen
 import eu.kanade.presentation.more.settings.screen.browse.ExtensionReposScreen
 import eu.kanade.presentation.more.settings.screen.data.RestoreBackupScreen
 import eu.kanade.presentation.util.AssistContentScreen
 import eu.kanade.presentation.util.DefaultNavigatorScreenTransition
+import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.tachiyomi.BuildConfig
+import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
@@ -89,6 +93,7 @@ import eu.kanade.tachiyomi.ui.deeplink.DeepLinkScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.more.NewUpdateScreen
 import eu.kanade.tachiyomi.ui.more.OnboardingScreen
+import eu.kanade.tachiyomi.ui.libraryUpdateError.LibraryUpdateErrorScreen
 import eu.kanade.tachiyomi.ui.player.ExternalIntents
 import eu.kanade.tachiyomi.ui.player.PlayerActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
@@ -195,6 +200,11 @@ class MainActivity : BaseActivity() {
 
                 LaunchedEffect(navigator) {
                     this@MainActivity.navigator = navigator
+                    
+                    // Set performance screen provider
+                    eu.kanade.tachiyomi.util.system.PerformanceBenchmarkHelper.setCurrentScreenProvider {
+                        navigator.lastItem::class.simpleName
+                    }
 
                     if (isLaunch) {
                         // Set start screen
@@ -206,32 +216,34 @@ class MainActivity : BaseActivity() {
                 }
 
                 val scaffoldInsets = WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)
-                Scaffold(
-                    topBar = {
-                        AppStateBanners(
-                            downloadedOnlyMode = downloadOnly,
-                            incognitoMode = incognito,
-                            indexing = indexingAnime,
-                            libraryUpdateProgress = libraryUpdateProgress,
-                            modifier = Modifier.windowInsetsPadding(scaffoldInsets),
-                        )
-                    },
-                    containerColor = MaterialTheme.colorScheme.background,
-                    contentWindowInsets = scaffoldInsets,
-                ) { contentPadding ->
-                    // Consume insets already used by app state banners
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.background),
-                    ) {
-                        // Shows current screen
-                        DefaultNavigatorScreenTransition(
-                            navigator = navigator,
+                CompositionLocalProvider(LocalBackPress provides navigator::pop) {
+                    Scaffold(
+                        topBar = {
+                            AppStateBanners(
+                                downloadedOnlyMode = downloadOnly,
+                                incognitoMode = incognito,
+                                indexing = indexingAnime,
+                                libraryUpdateProgress = libraryUpdateProgress,
+                                modifier = Modifier.windowInsetsPadding(scaffoldInsets),
+                            )
+                        },
+                        containerColor = MaterialTheme.colorScheme.background,
+                        contentWindowInsets = scaffoldInsets,
+                    ) { contentPadding ->
+                        // Consume insets already used by app state banners
+                        Box(
                             modifier = Modifier
-                                .padding(contentPadding)
-                                .consumeWindowInsets(contentPadding),
-                        )
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                        ) {
+                            // Shows current screen
+                            DefaultNavigatorScreenTransition(
+                                navigator = navigator,
+                                modifier = Modifier
+                                    .padding(contentPadding)
+                                    .consumeWindowInsets(contentPadding),
+                            )
+                        }
                     }
                 }
 
@@ -267,8 +279,19 @@ class MainActivity : BaseActivity() {
                         .onEach {
                             DiscordRPCService.stop(this@MainActivity.applicationContext, 0L)
                             DiscordRPCService.start(this@MainActivity.applicationContext)
-                            DiscordRPCService.setAnimeScreen(this@MainActivity, DiscordScreen.MORE)
-                            DiscordRPCService.setMangaScreen(this@MainActivity, DiscordScreen.MORE)
+                            DiscordRPCService.setAnimeScreen(this@MainActivity, DiscordScreen.APP)
+                        }.launchIn(this)
+
+                    preferences.incognitoMode().changes()
+                        .drop(1)
+                        .onEach {
+                            DiscordRPCService.setAnimeScreen(this@MainActivity, DiscordRPCService.lastUsedScreen)
+                        }.launchIn(this)
+
+                    connectionsPreferences.discordRPCIncognito().changes()
+                        .drop(1)
+                        .onEach {
+                            DiscordRPCService.setAnimeScreen(this@MainActivity, DiscordRPCService.lastUsedScreen)
                         }.launchIn(this)
                     // <-- AM (DISCORD)
                 }
@@ -455,23 +478,28 @@ class MainActivity : BaseActivity() {
         }
 
         val tabToOpen = when (intent.action) {
-            Constants.SHORTCUT_ANIMELIB -> HomeScreen.Tab.AnimeLib()
+            Constants.SHORTCUT_ANIMELIB -> HomeScreen.HomeTab.AnimeLib()
             Constants.SHORTCUT_ANIME -> {
                 val idToOpen = intent.extras?.getLong(Constants.ANIME_EXTRA)
                 if (idToOpen != null) {
                     navigator.popUntilRoot()
-                    HomeScreen.Tab.AnimeLib(idToOpen)
+                    HomeScreen.HomeTab.AnimeLib(idToOpen)
                 } else {
                     null
                 }
             }
-            Constants.SHORTCUT_UPDATES -> HomeScreen.Tab.Updates
-            Constants.SHORTCUT_HISTORY -> HomeScreen.Tab.History
-            Constants.SHORTCUT_SOURCES -> HomeScreen.Tab.Browse(false)
-            Constants.SHORTCUT_ANIMEEXTENSIONS -> HomeScreen.Tab.Browse(true, true)
+            Constants.SHORTCUT_UPDATES -> HomeScreen.HomeTab.Updates
+            Constants.SHORTCUT_HISTORY -> HomeScreen.HomeTab.History
+            Constants.SHORTCUT_SOURCES -> HomeScreen.HomeTab.Browse(false)
+            Constants.SHORTCUT_ANIMEEXTENSIONS -> HomeScreen.HomeTab.Browse(true, true)
             Constants.SHORTCUT_ANIME_DOWNLOADS -> {
                 navigator.popUntilRoot()
-                HomeScreen.Tab.More(toDownloads = true)
+                HomeScreen.HomeTab.More(toDownloads = true)
+            }
+            Constants.SHORTCUT_LIBRARY_UPDATE_ERRORS -> {
+                navigator.popUntilRoot()
+                navigator.push(LibraryUpdateErrorScreen())
+                null
             }
             Intent.ACTION_SEARCH, Intent.ACTION_SEND, "com.google.android.gms.actions.SEARCH_ACTION" -> {
                 // If the intent match the "standard" Android search intent
@@ -505,7 +533,7 @@ class MainActivity : BaseActivity() {
                     navigator.push(RestoreBackupScreen(intent.data.toString()))
                 }
                 // Deep link to add anime extension repo
-                else if (intent.scheme == "anizen" && intent.data?.host == "add-repo") {
+                else if ((intent.scheme == "anizen" || intent.scheme == "aniyomi" || intent.scheme == "mihon" || intent.scheme == "tachiyomi") && intent.data?.host == "add-repo") {
                     intent.data?.getQueryParameter("url")?.let { repoUrl ->
                         navigator.popUntilRoot()
                         navigator.push(ExtensionReposScreen(repoUrl))
@@ -564,7 +592,19 @@ class MainActivity : BaseActivity() {
                     withUIContext { Injekt.get<Application>().toast(e.message) }
                     null
                 } ?: return
-                externalPlayerResult?.launch(intent) ?: return
+                
+                val chooserIntent = if (intent.getPackage() == null && intent.component == null) {
+                    Intent.createChooser(intent, context.getString(R.string.action_play_externally))
+                } else {
+                    intent
+                }
+                
+                try {
+                    externalPlayerResult?.launch(chooserIntent)
+                } catch (e: Exception) {
+                    logcat(LogPriority.ERROR, e)
+                    withUIContext { context.toast("No external player found") }
+                }
             } else {
                 context.startActivity(
                     PlayerActivity.newIntent(

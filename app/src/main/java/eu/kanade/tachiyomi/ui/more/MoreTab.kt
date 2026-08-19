@@ -4,9 +4,11 @@ import androidx.compose.animation.graphics.res.animatedVectorResource
 import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
 import androidx.compose.animation.graphics.vector.AnimatedImageVector
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import cafe.adriel.voyager.core.model.ScreenModel
@@ -15,11 +17,13 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.core.preference.asState
 import eu.kanade.domain.base.BasePreferences
+import eu.kanade.domain.ui.UiPreferences
+import eu.kanade.domain.ui.model.NavItem
 import eu.kanade.presentation.more.MoreScreen
+import eu.kanade.presentation.util.LocalBackPress
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
@@ -27,6 +31,7 @@ import eu.kanade.tachiyomi.data.connections.discord.DiscordScreen
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
+import eu.kanade.tachiyomi.ui.libraryUpdateError.LibraryUpdateErrorScreen
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.setting.PlayerSettingsScreen
 import eu.kanade.tachiyomi.ui.setting.SettingsScreen
@@ -40,6 +45,7 @@ import kotlinx.coroutines.flow.combine
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.util.collectAsState as collectAsStatePref
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -48,12 +54,10 @@ data object MoreTab : Tab {
     override val options: TabOptions
         @Composable
         get() {
-            val isSelected = LocalTabNavigator.current.current.key == key
-            val image = AnimatedImageVector.animatedVectorResource(R.drawable.anim_more_enter)
             return TabOptions(
                 index = 4u,
                 title = stringResource(MR.strings.label_more),
-                icon = rememberAnimatedVectorPainter(image, isSelected),
+                icon = rememberAnimatedVectorPainter(AnimatedImageVector.animatedVectorResource(R.drawable.anim_more_enter), false),
             )
         }
 
@@ -67,30 +71,41 @@ data object MoreTab : Tab {
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { MoreScreenModel() }
         val downloadQueueState by screenModel.downloadQueueState.collectAsState()
-        val navStyle = currentNavigationStyle()
-        MoreScreen(
-            downloadQueueStateProvider = { downloadQueueState },
-            downloadedOnly = screenModel.downloadedOnly,
-            onDownloadedOnlyChange = { screenModel.downloadedOnly = it },
-            incognitoMode = screenModel.incognitoMode,
-            onIncognitoModeChange = { screenModel.incognitoMode = it },
-            isFDroid = context.isInstalledFromFDroid(),
-            navStyle = navStyle,
-            onClickAlt = { navigator.push(navStyle.moreTab) },
-            onClickDownloadQueue = { navigator.push(DownloadQueueScreen) },
-            onClickCategories = { navigator.push(CategoryScreen) },
-            onClickStats = { navigator.push(StatsScreen) },
-            onClickDataAndStorage = { navigator.push(SettingsScreen(SettingsScreen.Destination.DataAndStorage)) },
-            onClickPlayerSettings = { navigator.push(PlayerSettingsScreen) },
-            onClickSettings = { navigator.push(SettingsScreen()) },
-            onClickAbout = { navigator.push(SettingsScreen(SettingsScreen.Destination.About)) },
-        )
+        val uiPreferences = remember { Injekt.get<UiPreferences>() }
+        val hideTabsCompletely by uiPreferences.hideTabsCompletely().collectAsStatePref()
+        val hiddenTabsId by uiPreferences.bottomNavHiddenTabs().collectAsStatePref()
+        val hiddenTabs = remember(hiddenTabsId, hideTabsCompletely) {
+            if (hideTabsCompletely) {
+                emptyList()
+            } else {
+                hiddenTabsId.mapNotNull { NavItem.fromId(it) }
+            }
+        }
+
+        CompositionLocalProvider(LocalBackPress provides navigator::pop) {
+            MoreScreen(
+                downloadQueueStateProvider = { downloadQueueState },
+                downloadedOnly = screenModel.downloadedOnly,
+                onDownloadedOnlyChange = { screenModel.downloadedOnly = it },
+                incognitoMode = screenModel.incognitoMode,
+                onIncognitoModeChange = { screenModel.incognitoMode = it },
+                isFDroid = context.isInstalledFromFDroid(),
+                hiddenTabs = hiddenTabs,
+                onClickDownloadQueue = { navigator.push(DownloadQueueScreen) },
+                onClickCategories = { navigator.push(CategoryScreen) },
+                onClickStats = { navigator.push(StatsScreen) },
+                onClickLibraryUpdateErrors = { navigator.push(LibraryUpdateErrorScreen()) },
+                onClickDataAndStorage = { navigator.push(SettingsScreen(SettingsScreen.Destination.DataAndStorage)) },
+                onClickPlayerSettings = { navigator.push(PlayerSettingsScreen) },
+                onClickSettings = { navigator.push(SettingsScreen()) },
+                onClickAbout = { navigator.push(SettingsScreen(SettingsScreen.Destination.About)) },
+            )
+        }
 
         LaunchedEffect(Unit) {
             (context as? MainActivity)?.ready = true
             // AM (DISCORD) -->
-            DiscordRPCService.setAnimeScreen(context, DiscordScreen.MORE)
-            DiscordRPCService.setMangaScreen(context, DiscordScreen.MORE)
+            DiscordRPCService.setAnimeScreen(context, DiscordScreen.APP)
             // <-- AM (DISCORD)
         }
     }

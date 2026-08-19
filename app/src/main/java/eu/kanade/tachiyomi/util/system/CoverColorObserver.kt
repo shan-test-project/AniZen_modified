@@ -12,6 +12,7 @@ object CoverColorObserver {
     val ratios = _ratios.asStateFlow()
 
     fun update(animeId: Long, color: Int) {
+        if (_vibrantColors.value[animeId] == color) return
         _vibrantColors.update { it + (animeId to color) }
     }
 

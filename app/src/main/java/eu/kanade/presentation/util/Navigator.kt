@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.ScreenModelStore
@@ -38,9 +39,12 @@ import uy.kohesive.injekt.api.get
  */
 val LocalBackPress: ProvidableCompositionLocal<(() -> Unit)?> = staticCompositionLocalOf { null }
 
-private val uiPreferences: UiPreferences = Injekt.get()
+internal val uiPreferences: UiPreferences = Injekt.get()
 
 interface Tab : cafe.adriel.voyager.navigator.tab.Tab {
+    override val key: ScreenKey
+        get() = this::class.qualifiedName!!
+
     suspend fun onReselect(navigator: Navigator) {}
 
     // SY -->
@@ -49,6 +53,12 @@ interface Tab : cafe.adriel.voyager.navigator.tab.Tab {
 
     @Composable
     fun currentNavigationStyle(): NavStyle = uiPreferences.navStyle().collectAsState().value
+
+    @Composable
+    fun isTabFromMore(id: String): Boolean {
+        val visibleTabs by uiPreferences.bottomNavTabs().collectAsState()
+        return !visibleTabs.contains(id)
+    }
 }
 
 abstract class Screen : Screen {
@@ -107,9 +117,12 @@ fun ScreenTransition(
         transitionSpec = transition,
         modifier = modifier,
         label = "transition",
+        contentKey = { it.key },
     ) { screen ->
-        navigator.saveableState("transition", screen) {
-            content(screen)
+        key(screen.key) {
+            navigator.saveableState("transition", screen) {
+                content(screen)
+            }
         }
     }
 }

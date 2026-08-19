@@ -31,7 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
 import eu.kanade.tachiyomi.ui.player.controls.components.ControlsButton
 import tachiyomi.presentation.core.components.material.padding
@@ -77,15 +76,4 @@ fun TopLeftPlayerControls(
             )
         }
     }
-}
-
-@Preview
-@Composable
-fun TopLeftPlayerControlsPreview() {
-    TopLeftPlayerControls(
-        animeTitle = "Bleach",
-        mediaTitle = "Episode 1 - A Shinigami is born",
-        onTitleClick = {},
-        onBackClick = {},
-    )
 }

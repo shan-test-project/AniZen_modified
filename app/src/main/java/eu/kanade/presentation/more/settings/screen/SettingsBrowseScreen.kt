@@ -47,6 +47,15 @@ object SettingsBrowseScreen : SearchableSettings {
                         pref = sourcePreferences.hideInAnimeLibraryItems(),
                         title = stringResource(MR.strings.pref_hide_in_anime_library_items),
                     ),
+                    Preference.PreferenceItem.SwitchPreference(
+                        pref = sourcePreferences.hideLatest(),
+                        title = stringResource(MR.strings.pref_hide_latest),
+                    ),
+                    Preference.PreferenceItem.SwitchPreference(
+                        pref = sourcePreferences.autoSearch(),
+                        title = stringResource(MR.strings.pref_auto_search),
+                        subtitle = stringResource(MR.strings.pref_auto_search_summary),
+                    ),
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.label_anime_extension_repos),
                         subtitle = pluralStringResource(
@@ -90,6 +99,11 @@ object SettingsBrowseScreen : SearchableSettings {
                         pref = sourcePreferences.relatedAnimeExpand(),
                         title = stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_expand_related_mangas),
                         subtitle = stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_expand_related_mangas_summary),
+                    ),
+                    Preference.PreferenceItem.SwitchPreference(
+                        pref = sourcePreferences.relatedAnimeShowSmart(),
+                        title = stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_smart_related_mangas),
+                        subtitle = stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_smart_related_mangas_summary),
                     ),
                     Preference.PreferenceItem.SwitchPreference(
                         pref = sourcePreferences.relatedAnimeInOverflow(),

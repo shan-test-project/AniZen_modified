@@ -151,7 +151,7 @@ class EpisodeOptionsDialogScreen(
 
 class EpisodeOptionsDialogScreenModel(
     episodeId: Long,
-    animeId: Long,
+    private val animeId: Long,
     sourceId: Long,
 ) : ScreenModel {
     private val sourceManager: SourceManager = Injekt.get()
@@ -226,13 +226,15 @@ class EpisodeOptionsDialogScreenModel(
             _hosterState.update { _ -> Result.success(initialHosterState) }
 
             try {
+                val defaultSelector = eu.kanade.tachiyomi.ui.player.utils.DefaultStreamPreferenceStore(playerPreferences).getEffectiveSelector(animeId)
+
                 hosterList.mapIndexed { hosterIdx, hoster ->
                     async {
                         val hosterState = EpisodeLoader.loadHosterVideos(source, hoster)
 
                         _hosterState.updateAt(hosterIdx, hosterState)
 
-                        if (hosterState is HosterState.Ready) {
+                        if (defaultSelector.isBlank() && hosterState is HosterState.Ready) {
                             val prefIndex = hosterState.videoList.indexOfFirst { it.preferred }
                             if (prefIndex != -1) {
                                 if (hasFoundPreferredVideo.compareAndSet(false, true)) {
@@ -246,6 +248,23 @@ class EpisodeOptionsDialogScreenModel(
                         }
                     }
                 }.awaitAll()
+
+                if (!hasFoundPreferredVideo.get() && defaultSelector.isNotBlank()) {
+                    val states = hosterState.value?.getOrNull().orEmpty()
+                    val strictRanked = eu.kanade.tachiyomi.ui.player.utils.DefaultStreamSelector.findRankedInHosters(defaultSelector, states)
+                    val ranked = strictRanked + eu.kanade.tachiyomi.ui.player.utils.DefaultStreamSelector.findRankedInHostersRelaxed(defaultSelector, states)
+                        .filter { it !in strictRanked }
+
+                    for ((hIdx, vIdx) in ranked.distinct()) {
+                        val ready = states.getOrNull(hIdx) as? HosterState.Ready ?: continue
+                        val video = ready.videoList.getOrNull(vIdx) ?: continue
+                        if (hasFoundPreferredVideo.compareAndSet(false, true)) {
+                            val success = loadVideo(source, video, hIdx, vIdx)
+                            if (success) break
+                            hasFoundPreferredVideo.set(false)
+                        }
+                    }
+                }
 
                 if (hasFoundPreferredVideo.compareAndSet(false, true)) {
                     val hosterStateList = hosterState.value!!.getOrThrow()
@@ -380,6 +399,17 @@ class EpisodeOptionsDialogScreenModel(
             val success = loadVideo(_source.value!!, video, hosterIndex, videoIndex)
             if (success) {
                 _showAllQualities.update { _ -> false }
+                val hoster = _hosterList.value.getOrNull(hosterIndex)
+                if (hoster != null) {
+                    val store = eu.kanade.tachiyomi.ui.player.utils.DefaultStreamPreferenceStore(playerPreferences)
+                    val currentComposite = store.getEffectiveSelector(animeId)
+                    val newComposite = eu.kanade.tachiyomi.ui.player.utils.DefaultStreamSelector.updateCompositeSelector(
+                        currentComposite,
+                        hoster.hosterName,
+                        eu.kanade.tachiyomi.ui.player.utils.DefaultStreamSelector.selectorFor(video, hoster.hosterName),
+                    )
+                    store.setSelector(animeId, newComposite)
+                }
             }
         }
     }
@@ -528,8 +558,8 @@ private fun VideoList(
                 }
 
                 QualityOptions(
-                    onDownloadClicked = { downloadEpisode(useExternalDownloader) },
-                    onExtDownloadClicked = { downloadEpisode(!useExternalDownloader) },
+                    onDownloadClicked = { downloadEpisode(false) },
+                    onExtDownloadClicked = { downloadEpisode(true) },
                     onCopyClicked = {
                         clipboardManager.setText(AnnotatedString(currentVideo.videoUrl))
                         scope.launch { context.toast(copiedString) }
@@ -752,9 +782,15 @@ private fun sendEpisodesToCast(
             putString(MediaMetadata.KEY_SUBTITLE, episode)
             addImage(WebImage(Uri.parse(image)))
         }
+        val castContentType = when {
+            videoUrl.contains(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
+            videoUrl.contains(".mpd", ignoreCase = true) -> "application/dash+xml"
+            videoUrl.contains(".mkv", ignoreCase = true) -> "video/x-matroska"
+            else -> "video/mp4"
+        }
         val mediaInfo = MediaInfo.Builder(videoUrl)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType("video/mp4")
+            .setContentType(castContentType)
             .setMetadata(mediaMetadata)
             .build()
         val mediaQueueItem = MediaQueueItem.Builder(mediaInfo)

@@ -24,7 +24,7 @@ import okhttp3.Request
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.source.service.SourceHealthCache
 import tachiyomi.domain.source.service.SourceManager
-import tachiyomi.source.local.isLocal
+import tachiyomi.source.localanime.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.net.InetAddress
@@ -56,13 +56,12 @@ class InfrastructureScreenModel(
 
         val report = state.report
         val sb = StringBuilder()
-        sb.append("--- ANIZEN INFRASTRUCTURE REPORT ---\n")
+        sb.append("--- ANIZEN EXTENSION HEALTH REPORT ---\n")
         sb.append("Timestamp: ${java.time.Instant.now()}\n")
-        sb.append("BDIX Saturation: ${report.globalMetrics.bdixSaturation}%\n")
         sb.append("Avg Latency: ${report.globalMetrics.avgLatency}ms\n")
-        sb.append("Active Nodes: ${report.globalMetrics.activeNodeCount}/${report.nodes.size}\n\n")
+        sb.append("Active Sources: ${report.globalMetrics.activeNodeCount}/${report.nodes.size}\n\n")
 
-        sb.append("--- NODE STATUS ---\n")
+        sb.append("--- SOURCE STATUS ---\n")
         report.nodes.forEach { node ->
             sb.append("${node.name} [${node.status}]: ${node.network.latency}ms (${node.network.topology})\n")
             sb.append("  IP: ${node.network.ipAddress}, TLS: ${node.network.tlsVersion}\n")
@@ -126,7 +125,7 @@ class InfrastructureScreenModel(
             }
 
             val metrics = GlobalNetworkMetrics(
-                bdixSaturation = if (nodes.isNotEmpty()) (nodes.count { it.network.topology == "BDIX" }.toDouble() / nodes.size * 100).toInt() else 0,
+                bdixSaturation = 0,
                 totalDataConsumed = 0,
                 avgLatency = if (nodes.isNotEmpty()) nodes.filter { it.status == NodeStatus.OPERATIONAL }.map { it.network.latency }.average().toInt() else 0,
                 activeNodeCount = nodes.count { it.status == NodeStatus.OPERATIONAL }
@@ -140,19 +139,12 @@ class InfrastructureScreenModel(
     }
 
     private fun createPlaceholderNode(source: HttpSource): SourceNode {
-        val name = source.name.lowercase()
-        val isBdix = name.contains("dflix") || name.contains("dhaka") || name.contains("bdix") || 
-                     name.contains("ftp") || name.contains("sam") || name.contains("bijoy") ||
-                     name.contains("icc") || name.contains("fanush") || name.contains("nagordola") ||
-                     name.contains("amader") || name.contains("cineplex") || name.contains("roarzone") ||
-                     name.contains("infomedia") || name.contains("fm ftp") || name.contains("bas play")
-
         return SourceNode(
             name = source.name,
             pkgName = source::class.java.name.substringBeforeLast("."),
             version = "Scanning...",
             status = NodeStatus.OPERATIONAL,
-            network = NetworkDiagnostics(0, if (isBdix) "BDIX" else "Global", "...", "...", false),
+            network = NetworkDiagnostics(0, "Global CDN", "...", "...", false),
             capabilities = SourceCapabilities(detectIsApi(source), false, source.supportsLatest, true),
             uptimeScore = 1.0
         )
@@ -174,13 +166,49 @@ class InfrastructureScreenModel(
         val className = source::class.java.simpleName.lowercase()
         val pkg = source::class.java.name.lowercase()
         
-        return className.contains("api") || 
+        // Basic name heuristics
+        val nameMatch = className.contains("api") || 
                className.contains("json") || 
                className.contains("graphql") ||
                name.contains("api") || 
                name.contains("json") ||
                pkg.contains("api") ||
                pkg.contains("json")
+
+        if (nameMatch) return true
+
+        // Advanced detection: Check if source has a 'json' field or uses serialization
+        return try {
+            val isParsed = source::class.java.name.contains("Parsed")
+            if (isParsed) return false
+
+            source::class.java.declaredFields.any { 
+                it.type.name.contains("kotlinx.serialization.json.Json") ||
+                it.name.contains("json")
+            } || source::class.java.methods.any { 
+                it.name.contains("parseAs") || it.returnType.name.contains("Json")
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun detectSearchSupport(source: HttpSource): Boolean {
+        // 1. If it has filters, it likely supports search
+        try {
+            if (source.getFilterList().isNotEmpty()) return true
+        } catch (e: Exception) {}
+
+        // 2. Check if searchAnimeRequest is overridden from AnimeHttpSource
+        // Since it's abstract in base, we check if it's implemented in a non-abstract way
+        // that doesn't just throw UnsupportedOperationException (heuristic)
+        return try {
+            val method = source::class.java.getMethod("searchAnimeRequest", Int::class.java, String::class.java, eu.kanade.tachiyomi.animesource.model.AnimeFilterList::class.java)
+            val declaringClass = method.declaringClass.name
+            !declaringClass.contains("AnimeHttpSource") && !declaringClass.contains("HttpSource")
+        } catch (e: Exception) {
+            true // Fallback to true if we can't tell
+        }
     }
 
     private suspend fun probeNode(source: HttpSource): SourceNode {
@@ -225,13 +253,6 @@ class InfrastructureScreenModel(
             ip = "Network Err"
         }
 
-        val name = source.name.lowercase()
-        val isBdix = name.contains("dflix") || name.contains("dhaka") || name.contains("bdix") || 
-                     name.contains("ftp") || name.contains("sam") || name.contains("bijoy") ||
-                     name.contains("icc") || name.contains("fanush") || name.contains("nagordola") ||
-                     name.contains("amader") || name.contains("cineplex") || name.contains("roarzone") ||
-                     name.contains("infomedia") || name.contains("fm ftp") || name.contains("bas play")
-
         return SourceNode(
             name = source.name,
             pkgName = source::class.java.name.substringBeforeLast("."),
@@ -239,7 +260,7 @@ class InfrastructureScreenModel(
             status = if (status == NodeStatus.OPERATIONAL && latency > 2500) NodeStatus.DEGRADED else status,
             network = NetworkDiagnostics(
                 latency = latency,
-                topology = if (isBdix) "BDIX" else "Global CDN",
+                topology = "Global CDN",
                 ipAddress = ip,
                 tlsVersion = tls,
                 dnsResolved = resolved
@@ -248,7 +269,7 @@ class InfrastructureScreenModel(
                 isApi = detectIsApi(source),
                 mtSupport = false,
                 latestSupport = source.supportsLatest,
-                searchSupport = true
+                searchSupport = detectSearchSupport(source)
             ),
             uptimeScore = if (status == NodeStatus.OPERATIONAL) 1.0 else 0.0
         )

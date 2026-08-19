@@ -21,6 +21,8 @@ import okhttp3.Request
 import okhttp3.Response
 import rx.Observable
 import tachiyomi.core.common.util.lang.awaitSingle
+import android.graphics.Bitmap
+import eu.kanade.tachiyomi.animesource.model.ThumbnailInfo
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
@@ -48,6 +50,13 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * incompatible, you may increase this value and it'll be considered as a new source.
      */
     open val versionId = 1
+
+    /**
+     * Preferences for the source.
+     */
+    open val preferences: android.content.SharedPreferences by lazy {
+        uy.kohesive.injekt.Injekt.get<android.app.Application>().getSharedPreferences("source_$id", android.content.Context.MODE_PRIVATE)
+    }
 
     /**
      * ID of the source. By default it uses a generated id using the first 16 characters (64 bits)
@@ -251,6 +260,54 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      */
     protected abstract fun animeDetailsParse(response: Response): SAnime
 
+    // KMK -->
+
+    /**
+     * Whether parsing related animes in anime page or extension provide custom related animes request.
+     *
+     * @default true
+     * @since komikku/extensions-lib 1.6
+     */
+    override val supportsRelatedAnimes: Boolean get() = true
+
+    /**
+     * Fetch related animes for an anime from source/site.
+     * Normally it's not needed to override this method.
+     *
+     * @since komikku/extensions-lib 1.6
+     * @param anime the current anime to get related animes.
+     * @return the related animes for the current anime.
+     * @throws UnsupportedOperationException if a source doesn't support related animes.
+     */
+    override suspend fun fetchRelatedAnimeList(anime: SAnime): List<SAnime> {
+        return client.newCall(relatedAnimeListRequest(anime))
+            .awaitSuccess()
+            .let { response ->
+                relatedAnimeListParse(response)
+            }
+    }
+
+    /**
+     * Returns the request for get related anime list. Override only if it's needed to override
+     * the url, send different headers or request method like POST.
+     * Normally it's not needed to override this method.
+     *
+     * @since komikku/extensions-lib 1.6
+     * @param anime the anime to look for related animes.
+     */
+    protected open fun relatedAnimeListRequest(anime: SAnime): Request {
+        return animeDetailsRequest(anime)
+    }
+
+    /**
+     * Parses the response from the site and returns a list of related animes.
+     *
+     * @since komikku/extensions-lib 1.6
+     * @param response the response from the site.
+     */
+    protected open fun relatedAnimeListParse(response: Response): List<SAnime> = throw UnsupportedOperationException("Unsupported!")
+    // KMK <--
+
     /**
      * Get all the available episodes for an anime.
      * Normally it's not needed to override this method.
@@ -431,7 +488,7 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @since extensions-lib 16
      */
-    protected open fun List<Hoster>.sortHosters(): List<Hoster> {
+    open fun List<Hoster>.sortHosters(): List<Hoster> {
         return this
     }
 
@@ -440,15 +497,15 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      *
      * @since extensions-lib 16
      */
-    protected open fun List<Video>.sortVideos(): List<Video> {
-        return this
+    open fun List<Video>.sortVideos(): List<Video> {
+        return sort()
     }
 
     /**
      * Sorts the video list. Override this according to the user's preference.
      */
     @Deprecated("Use .sortVideos() instead", replaceWith = ReplaceWith("sortVideos"))
-    protected open fun List<Video>.sort(): List<Video> {
+    open fun List<Video>.sort(): List<Video> {
         return this
     }
 
@@ -487,6 +544,21 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @param response the response from the site.
      */
     protected abstract fun videoUrlParse(response: Response): String
+
+    /**
+     * Return info for thumbnails to be used as a preview when seeking.
+     *
+     * @since extensions-lib 17
+     * @param video the video information.
+     * @return the info for thumbnails. Return null if no thumbnails exist.
+     */
+    open suspend fun getVideoThumbnails(video: Video): ThumbnailInfo? {
+        return null
+    }
+
+    open suspend fun getImageTile(url: String): Bitmap? {
+        return null
+    }
 
     /**
      * Returns the response of the source video.
@@ -614,7 +686,18 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @return url of the anime
      */
     open fun getAnimeUrl(anime: SAnime): String {
-        return animeDetailsRequest(anime).url.toString()
+        return runCatching { animeDetailsRequest(anime).url.toString() }
+            .getOrElse {
+                val url = anime.url
+                when {
+                    url.startsWith("http://") || url.startsWith("https://") -> url
+                    else -> {
+                        val base = baseUrl.trimEnd('/')
+                        val path = url.trimStart('/')
+                        "$base/$path"
+                    }
+                }
+            }
     }
 
     /**
@@ -625,7 +708,15 @@ abstract class AnimeHttpSource : AnimeCatalogueSource {
      * @return url of the episode
      */
     open fun getEpisodeUrl(episode: SEpisode): String {
-        return episode.url
+        val url = episode.url
+        return when {
+            url.startsWith("http://") || url.startsWith("https://") -> url
+            else -> {
+                val base = baseUrl.trimEnd('/')
+                val path = url.trimStart('/')
+                "$base/$path"
+            }
+        }
     }
 
     /**

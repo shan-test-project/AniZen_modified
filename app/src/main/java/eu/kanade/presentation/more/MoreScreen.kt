@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,20 +17,20 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.outlined.CallToAction
 import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.DynamicForm
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LocalLibrary
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
@@ -40,16 +39,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -58,15 +60,19 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import eu.kanade.domain.ai.AiPreferences
-import eu.kanade.domain.ui.model.NavStyle
+import eu.kanade.domain.ui.model.NavItem
 import eu.kanade.presentation.more.settings.screen.ai.AiAssistantScreen
+import eu.kanade.presentation.more.settings.screen.NavigationSettingsScreen
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.more.DownloadQueueState
 import eu.kanade.tachiyomi.ui.stats.InfrastructureScreen
+import kotlinx.coroutines.launch
 import tachiyomi.core.common.Constants
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.pluralStringResource
@@ -75,6 +81,12 @@ import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
+import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+
+import eu.kanade.domain.ui.ContainerStyle
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.more.components.MoreItem
 import eu.kanade.presentation.more.components.MoreSection
 
@@ -86,11 +98,11 @@ fun MoreScreen(
     incognitoMode: Boolean,
     onIncognitoModeChange: (Boolean) -> Unit,
     isFDroid: Boolean,
-    navStyle: NavStyle,
-    onClickAlt: () -> Unit,
+    hiddenTabs: List<NavItem>,
     onClickDownloadQueue: () -> Unit,
     onClickCategories: () -> Unit,
     onClickStats: () -> Unit,
+    onClickLibraryUpdateErrors: () -> Unit,
     onClickDataAndStorage: () -> Unit,
     onClickPlayerSettings: () -> Unit,
     onClickSettings: () -> Unit,
@@ -98,6 +110,8 @@ fun MoreScreen(
 ) {
     val uriHandler = LocalUriHandler.current
     val navigator = LocalNavigator.currentOrThrow
+    val scope = rememberCoroutineScope()
+    val aiPreferences = remember { Injekt.get<AiPreferences>() }
 
     Scaffold(
         topBar = {
@@ -112,16 +126,13 @@ fun MoreScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { contentPadding ->
-        val aiPreferences = remember { Injekt.get<AiPreferences>() }
-        val displayName by aiPreferences.displayName().collectAsState()
-
         ScrollbarLazyColumn(
             modifier = Modifier.fillMaxSize().padding(contentPadding),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                ProfileHeader(name = displayName.ifBlank { "User" })
+                ProfileHeader()
             }
 
             item {
@@ -186,6 +197,11 @@ fun MoreScreen(
                         icon = Icons.Outlined.QueryStats,
                         onClick = onClickStats
                     )
+                    MoreItem(
+                        title = stringResource(SYMR.strings.option_label_library_update_errors),
+                        icon = Icons.Outlined.Info,
+                        onClick = onClickLibraryUpdateErrors
+                    )
                 }
             }
 
@@ -194,7 +210,7 @@ fun MoreScreen(
                     MoreItem(
                         title = "Extension Health",
                         subtitle = "Real-time telemetry and source status",
-                        icon = Icons.Outlined.DynamicForm,
+                        icon = Icons.Outlined.MonitorHeart,
                         onClick = { navigator.push(InfrastructureScreen) }
                     )
 
@@ -213,13 +229,32 @@ fun MoreScreen(
 
             item {
                 MoreSection(title = "General") {
-                    if (navStyle != NavStyle.SHOW_ALL) {
-                         MoreItem(
-                            title = navStyle.moreTab.options.title,
-                            icon = navStyle.moreIcon,
-                            onClick = onClickAlt
+                    hiddenTabs.forEach { navItem ->
+                        MoreItem(
+                            title = stringResource(navItem.titleRes),
+                            icon = navItem.iconVector,
+                            iconPainter = if (navItem.iconVector == null) painterResource(navItem.staticIconRes) else null,
+                            onClick = {
+                                scope.launch {
+                                    val homeTab = when (navItem) {
+                                        NavItem.LIBRARY -> HomeScreen.HomeTab.AnimeLib()
+                                        NavItem.FEED -> HomeScreen.HomeTab.Feed
+                                        NavItem.UPDATES -> HomeScreen.HomeTab.Updates
+                                        NavItem.HISTORY -> HomeScreen.HomeTab.History
+                                        NavItem.BROWSE -> HomeScreen.HomeTab.Browse()
+                                        NavItem.MORE -> HomeScreen.HomeTab.More(false)
+                                        else -> HomeScreen.HomeTab.More(false)
+                                    }
+                                    HomeScreen.openTab(homeTab)
+                                }
+                            }
                         )
                     }
+                    MoreItem(
+                        title = stringResource(MR.strings.pref_bottom_nav_settings),
+                        icon = Icons.Outlined.CallToAction,
+                        onClick = { navigator.push(NavigationSettingsScreen(null)) }
+                    )
                     MoreItem(
                         title = stringResource(MR.strings.label_data_storage),
                         icon = Icons.Outlined.Storage,
@@ -250,6 +285,11 @@ fun MoreScreen(
                         icon = Icons.AutoMirrored.Outlined.HelpOutline,
                         onClick = { uriHandler.openUri(Constants.URL_HELP) }
                     )
+                    MoreItem(
+                        title = stringResource(MR.strings.label_sponsor_me),
+                        icon = Icons.Outlined.Favorite,
+                        onClick = { uriHandler.openUri("https://www.patreon.com/10625779/join") }
+                    )
                 }
             }
         }
@@ -257,47 +297,16 @@ fun MoreScreen(
 }
 
 @Composable
-private fun ProfileHeader(name: String) {
-    val aiPreferences = remember { Injekt.get<AiPreferences>() }
-    val profilePhotoUri by aiPreferences.profilePhotoUri().collectAsState()
-
+private fun ProfileHeader() {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                .padding(4.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            if (profilePhotoUri.isNotEmpty()) {
-                AsyncImage(
-                    model = profilePhotoUri,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Outlined.LocalLibrary,
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp).align(Alignment.Center),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = name,
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 24.sp,
-                letterSpacing = 0.5.sp
-            ),
-            color = MaterialTheme.colorScheme.onBackground
+        Icon(
+            painter = painterResource(R.drawable.ic_splash_logo_raw),
+            contentDescription = null,
+            modifier = Modifier.size(100.dp),
+            tint = MaterialTheme.colorScheme.primary
         )
     }
 }
