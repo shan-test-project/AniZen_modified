@@ -118,6 +118,8 @@ import eu.kanade.tachiyomi.ui.anime.track.TrackItem
 import eu.kanade.tachiyomi.util.system.CoverColorObserver
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.anime.model.Anime
 import tachiyomi.domain.anime.model.asAnimeCover
@@ -369,8 +371,12 @@ private fun AnimeScreenSmallImpl(
             }
             BackHandler(onBack = internalOnBackPressed)
     
-            val vibrantColors by CoverColorObserver.vibrantColors.collectAsState()
-            val vibrantColor = vibrantColors[state.anime.id] ?: state.anime.asAnimeCover().vibrantCoverColor
+            val vibrantColorState by remember(state.anime.id) {
+                CoverColorObserver.vibrantColors
+                    .map { it[state.anime.id] }
+                    .distinctUntilChanged()
+            }.collectAsState(initial = CoverColorObserver.get(state.anime.id))
+            val vibrantColor = vibrantColorState ?: state.anime.asAnimeCover().vibrantCoverColor
     
             DynamicTachiyomiTheme(colorSeed = vibrantColor) {
                 val backgroundColor = MaterialTheme.colorScheme.background
@@ -778,8 +784,12 @@ fun AnimeScreenLargeImpl(
     }
     BackHandler(onBack = internalOnBackPressed)
 
-    val vibrantColors by CoverColorObserver.vibrantColors.collectAsState()
-    val vibrantColor = vibrantColors[state.anime.id] ?: state.anime.asAnimeCover().vibrantCoverColor
+    val vibrantColorState by remember(state.anime.id) {
+        CoverColorObserver.vibrantColors
+            .map { it[state.anime.id] }
+            .distinctUntilChanged()
+    }.collectAsState(initial = CoverColorObserver.get(state.anime.id))
+    val vibrantColor = vibrantColorState ?: state.anime.asAnimeCover().vibrantCoverColor
 
     DynamicTachiyomiTheme(colorSeed = vibrantColor) {
         val backgroundColor = MaterialTheme.colorScheme.background

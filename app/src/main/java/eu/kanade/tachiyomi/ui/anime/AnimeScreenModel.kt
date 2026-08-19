@@ -345,9 +345,6 @@ class AnimeScreenModel(
         }
 
         screenModelScope.launchIO {
-            // Update affinity vector in background if needed
-            calculateUserAffinity.await()
-            
             val source = sourceManager.get(anime.source) as? AnimeCatalogueSource ?: return@launchIO
             val library = getLibraryAnime.await()
             
