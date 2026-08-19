@@ -22,11 +22,13 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import okhttp3.Request
 import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.source.service.SourceHealthCache
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.source.localanime.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import logcat.LogPriority
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import kotlin.system.measureTimeMillis
@@ -86,55 +88,113 @@ class InfrastructureScreenModel(
         _isRefreshing.value = true
         
         screenModelScope.launchIO {
-            val disabledSourceIds = sourcePreferences.disabledSources().get()
-            val sources = sourceManager.getOnlineSources()
-                .filter { !it.isLocal() }
-                .filter { it.id.toString() !in disabledSourceIds }
-            
-            // Populate state with ALL sources immediately
-            val initialNodes = sources.map { source ->
-                createPlaceholderNode(source)
-            }
-            
-            mutableState.update { 
-                InfrastructureState.Success(InfrastructureReport(initialNodes, generateEmptyMetrics(initialNodes.size), emptyList()))
-            }
+            try {
+                val disabledSourceIds = sourcePreferences.disabledSources().get()
+                val sources = sourceManager.getOnlineSources()
+                    .filter { !it.isLocal() }
+                    .filter { it.id.toString() !in disabledSourceIds }
 
-            // Parallel Update
-            val nodes = sources.map { source ->
-                async {
-                    semaphore.withPermit {
-                        probeNode(source).also { finishedNode ->
-                            updateNodeInState(finishedNode)
-                            SourceHealthCache.updateStatus(source.id, finishedNode.status, finishedNode.network.latency)
+                // Populate state with ALL sources immediately.
+                val initialNodes = sources.map(::createPlaceholderNode)
+                mutableState.update {
+                    InfrastructureState.Success(
+                        InfrastructureReport(initialNodes, generateEmptyMetrics(initialNodes.size), emptyList()),
+                    )
+                }
+
+                // A single unhealthy source must not cancel the complete diagnostic run.
+                val nodes = sources.map { source ->
+                    async {
+                        semaphore.withPermit {
+                            runCatching { probeNode(source) }
+                                .getOrElse {
+                                    logcat(LogPriority.WARN, it) { "Diagnostic probe failed for ${source.name}" }
+                                    createPlaceholderNode(source).copy(
+                                        status = NodeStatus.OFFLINE,
+                                        version = "Probe failed",
+                                        network = NetworkDiagnostics(
+                                            latency = 0,
+                                            topology = "Unknown",
+                                            ipAddress = "Unavailable",
+                                            tlsVersion = "Unknown",
+                                            dnsResolved = false,
+                                        ),
+                                        uptimeScore = 0.0,
+                                    )
+                                }
+                                .also { finishedNode ->
+                                    updateNodeInState(finishedNode)
+                                    runCatching {
+                                        SourceHealthCache.updateStatus(
+                                            source.id,
+                                            finishedNode.status,
+                                            finishedNode.network.latency,
+                                        )
+                                    }.onFailure {
+                                        logcat(LogPriority.WARN, it) {
+                                            "Unable to update diagnostic cache for ${source.name}"
+                                        }
+                                    }
                         }
                     }
-                }
-            }.awaitAll()
+                }.awaitAll()
 
-            val sortedNodes = nodes.sortedWith(compareByDescending<SourceNode> { it.status == NodeStatus.OPERATIONAL }
-                .thenBy { it.network.latency })
-
-            val logs = nodes.filter { it.status != NodeStatus.OPERATIONAL }.map { node ->
-                SystemLogEntry(
-                    timestamp = System.currentTimeMillis(),
-                    level = if (node.status == NodeStatus.OFFLINE) LogLevel.ERROR else LogLevel.WARN,
-                    source = node.name,
-                    message = "Alert: ${node.status}. Response: ${node.network.latency}ms"
+                val sortedNodes = nodes.sortedWith(
+                    compareByDescending<SourceNode> { it.status == NodeStatus.OPERATIONAL }
+                        .thenBy { it.network.latency },
                 )
-            }
 
-            val metrics = GlobalNetworkMetrics(
-                bdixSaturation = 0,
-                totalDataConsumed = 0,
-                avgLatency = if (nodes.isNotEmpty()) nodes.filter { it.status == NodeStatus.OPERATIONAL }.map { it.network.latency }.average().toInt() else 0,
-                activeNodeCount = nodes.count { it.status == NodeStatus.OPERATIONAL }
-            )
+                val logs = nodes.filter { it.status != NodeStatus.OPERATIONAL }.map { node ->
+                    SystemLogEntry(
+                        timestamp = System.currentTimeMillis(),
+                        level = if (node.status == NodeStatus.OFFLINE) LogLevel.ERROR else LogLevel.WARN,
+                        source = node.name,
+                        message = "Alert: ${node.status}. Response: ${node.network.latency}ms",
+                    )
+                }
 
-            mutableState.update {
-                InfrastructureState.Success(InfrastructureReport(sortedNodes, metrics, logs))
+                val metrics = GlobalNetworkMetrics(
+                    bdixSaturation = 0,
+                    totalDataConsumed = 0,
+                    avgLatency = nodes
+                        .filter { it.status == NodeStatus.OPERATIONAL }
+                        .map { it.network.latency }
+                        .average()
+                        .takeIf { !it.isNaN() }
+                        ?.toInt()
+                        ?: 0,
+                    activeNodeCount = nodes.count { it.status == NodeStatus.OPERATIONAL },
+                )
+
+                mutableState.update {
+                    InfrastructureState.Success(InfrastructureReport(sortedNodes, metrics, logs))
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Unable to run extension diagnostics" }
+                mutableState.update { state ->
+                    if (state is InfrastructureState.Success) {
+                        state
+                    } else {
+                        InfrastructureState.Success(
+                            InfrastructureReport(
+                                nodes = emptyList(),
+                                globalMetrics = generateEmptyMetrics(0),
+                                systemLogs = listOf(
+                                    SystemLogEntry(
+                                        timestamp = System.currentTimeMillis(),
+                                        level = LogLevel.ERROR,
+                                        source = "Diagnostics",
+                                        message = "Unable to load extension health data",
+                                    ),
+                                ),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                // Always unlock refresh, including source-manager and coroutine failures.
+                _isRefreshing.value = false
             }
-            _isRefreshing.value = false
         }
     }
 

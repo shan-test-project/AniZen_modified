@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import logcat.LogPriority
@@ -182,9 +184,11 @@ class AiAssistantScreenModel(
             val fullResponse = StringBuilder()
             
             try {
-                aiManager.chatWithAssistantStream(query, history).collect { chunk ->
-                    fullResponse.append(chunk)
-                    mutableState.update { it.copy(streamingMessage = fullResponse.toString()) }
+                withTimeout(75_000) {
+                    aiManager.chatWithAssistantStream(query, history).collect { chunk ->
+                        fullResponse.append(chunk)
+                        mutableState.update { it.copy(streamingMessage = fullResponse.toString()) }
+                    }
                 }
 
                 // 4. Save AI Response once complete
@@ -197,7 +201,20 @@ class AiAssistantScreenModel(
                     if (userMessages.size == 1) {
                         updateSessionTitle(sessionId, query)
                     }
+                } else {
+                    chatRepository.insertMessage(
+                        sessionId,
+                        "model",
+                        "No response was returned. Check the selected AI provider and try again.",
+                    )
                 }
+            } catch (e: TimeoutCancellationException) {
+                logcat(LogPriority.WARN, e) { "AI assistant request timed out" }
+                chatRepository.insertMessage(
+                    sessionId,
+                    "model",
+                    "The diagnostic request timed out after 75 seconds. Check your connection and try again.",
+                )
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e)
                 chatRepository.insertMessage(sessionId, "model", "System error during uplink: ${e.message}")
