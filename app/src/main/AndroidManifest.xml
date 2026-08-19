@@ -301,10 +301,10 @@
             android:exported="false" />
 
         <receiver
-<<<<<<< HEAD
             android:name="mihon.feature.airingschedule.notification.ScheduleAlarmReceiver"
             android:exported="false" />
-=======
+
+        <receiver
             android:name=".data.updater.AppUpdateBroadcast"
             android:exported="false">
             <intent-filter>
@@ -312,7 +312,6 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
->>>>>>> 7370286a10d78c4628370db3be0d47aacd83835c
 
         <service
             android:name=".extension.util.ExtensionInstallService"
