@@ -76,7 +76,7 @@ android {
             isMinifyEnabled = providers.gradleProperty("enable-r8-debug")
                 .map(String::toBoolean)
                 .getOrElse(true)
-            isShrinkResources = false
+            isShrinkResources = true
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
         }
         val release by getting {
@@ -140,7 +140,9 @@ android {
     splits {
         abi {
             isEnable = true
-            isUniversalApk = true
+            // Universal APKs bundle every native player ABI and are unnecessarily large.
+            // Release each ABI separately; the build command selects the target ABI.
+            isUniversalApk = false
             reset()
             val abis = (project.findProperty("abiList") as? String)?.split(",") ?: listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             include(*abis.toTypedArray())

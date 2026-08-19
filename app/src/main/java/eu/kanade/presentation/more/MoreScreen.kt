@@ -208,8 +208,8 @@ fun MoreScreen(
             item {
                 MoreSection(title = "System") {
                     MoreItem(
-                        title = "Extension Health",
-                        subtitle = "Real-time telemetry and source status",
+                        title = "App Diagnostics",
+                        subtitle = "Real-time app and source health checks",
                         icon = Icons.Outlined.MonitorHeart,
                         onClick = { navigator.push(InfrastructureScreen) }
                     )
@@ -218,7 +218,7 @@ fun MoreScreen(
                     val enableAiAssistant by aiPreferences.enableAiAssistant().collectAsState()
                     if (enableAi && enableAiAssistant) {
                         MoreItem(
-                            title = "App Diagnostics",
+                            title = "AI Diagnostics",
                             subtitle = "Automated troubleshooting and AI insights",
                             icon = Icons.Default.Terminal,
                             onClick = { navigator.push(AiAssistantScreen()) }
