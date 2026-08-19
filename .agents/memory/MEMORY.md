@@ -1,0 +1,1 @@
+- [GitHub Actions fallback](github-actions-publishing.md) — when Git transport rejects an otherwise valid GitHub token, publish commits through the Git Database API and dispatch Actions via REST.
