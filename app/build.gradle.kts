@@ -75,7 +75,7 @@ android {
             isPseudoLocalesEnabled = true
             isMinifyEnabled = providers.gradleProperty("enable-r8-debug")
                 .map(String::toBoolean)
-                .getOrElse(false)
+                .getOrElse(true)
             isShrinkResources = false
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
         }
@@ -429,4 +429,4 @@ buildscript {
     dependencies {
         classpath(kotlinx.gradle)
     }
-}// Trigger build Sun Mar 29 21:15:36 +06 2026
+} // Trigger build Sun Mar 29 21:15:36 +06 2026

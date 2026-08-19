@@ -34,3 +34,9 @@ ktlint_standard_type-parameter-comment = disabled
 ktlint_standard_max-line-length = disabled
 ktlint_standard_value-argument-comment = disabled
 ktlint_standard_value-parameter-comment = disabled
+# Existing AniZen source uses grouped imports and legacy constant/backing names.
+# Keep the CI formatting gate focused on formatting rather than renaming behavior.
+ktlint_standard_no-wildcard-imports = disabled
+ktlint_standard_import-ordering = disabled
+ktlint_standard_backing-property-naming = disabled
+ktlint_standard_property-naming = disabled

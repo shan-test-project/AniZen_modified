@@ -86,7 +86,7 @@ class InfrastructureScreenModel(
     fun runDiagnostics() {
         if (_isRefreshing.value) return
         _isRefreshing.value = true
-        
+
         screenModelScope.launchIO {
             try {
                 val disabledSourceIds = sourcePreferences.disabledSources().get()
@@ -135,6 +135,7 @@ class InfrastructureScreenModel(
                                             "Unable to update diagnostic cache for ${source.name}"
                                         }
                                     }
+                                }
                         }
                     }
                 }.awaitAll()
@@ -206,7 +207,7 @@ class InfrastructureScreenModel(
             status = NodeStatus.OPERATIONAL,
             network = NetworkDiagnostics(0, "Global CDN", "...", "...", false),
             capabilities = SourceCapabilities(detectIsApi(source), false, source.supportsLatest, true),
-            uptimeScore = 1.0
+            uptimeScore = 1.0,
         )
     }
 
@@ -215,7 +216,9 @@ class InfrastructureScreenModel(
             if (state is InfrastructureState.Success) {
                 val updatedNodes = state.report.nodes.map { if (it.name == node.name) node else it }
                 state.copy(report = state.report.copy(nodes = updatedNodes))
-            } else state
+            } else {
+                state
+            }
         }
     }
 
@@ -225,15 +228,15 @@ class InfrastructureScreenModel(
         val name = source.name.lowercase()
         val className = source::class.java.simpleName.lowercase()
         val pkg = source::class.java.name.lowercase()
-        
+
         // Basic name heuristics
-        val nameMatch = className.contains("api") || 
-               className.contains("json") || 
-               className.contains("graphql") ||
-               name.contains("api") || 
-               name.contains("json") ||
-               pkg.contains("api") ||
-               pkg.contains("json")
+        val nameMatch = className.contains("api") ||
+            className.contains("json") ||
+            className.contains("graphql") ||
+            name.contains("api") ||
+            name.contains("json") ||
+            pkg.contains("api") ||
+            pkg.contains("json")
 
         if (nameMatch) return true
 
@@ -242,12 +245,13 @@ class InfrastructureScreenModel(
             val isParsed = source::class.java.name.contains("Parsed")
             if (isParsed) return false
 
-            source::class.java.declaredFields.any { 
+            source::class.java.declaredFields.any {
                 it.type.name.contains("kotlinx.serialization.json.Json") ||
-                it.name.contains("json")
-            } || source::class.java.methods.any { 
-                it.name.contains("parseAs") || it.returnType.name.contains("Json")
-            }
+                    it.name.contains("json")
+            } ||
+                source::class.java.methods.any {
+                    it.name.contains("parseAs") || it.returnType.name.contains("Json")
+                }
         } catch (e: Exception) {
             false
         }
@@ -306,8 +310,11 @@ class InfrastructureScreenModel(
             }.let { latency = it.toInt() }
 
             val domain = source.baseUrl.substringAfter("://").substringBefore("/")
-            ip = try { InetAddress.getByName(domain).hostAddress ?: "0.0.0.0" } catch(e: Exception) { "DNS Fail" }
-
+            ip = try {
+                InetAddress.getByName(domain).hostAddress ?: "0.0.0.0"
+            } catch (e: Exception) {
+                "DNS Fail"
+            }
         } catch (e: Exception) {
             status = NodeStatus.OFFLINE
             ip = "Network Err"
@@ -323,15 +330,15 @@ class InfrastructureScreenModel(
                 topology = "Global CDN",
                 ipAddress = ip,
                 tlsVersion = tls,
-                dnsResolved = resolved
+                dnsResolved = resolved,
             ),
             capabilities = SourceCapabilities(
                 isApi = detectIsApi(source),
                 mtSupport = false,
                 latestSupport = source.supportsLatest,
-                searchSupport = detectSearchSupport(source)
+                searchSupport = detectSearchSupport(source),
             ),
-            uptimeScore = if (status == NodeStatus.OPERATIONAL) 1.0 else 0.0
+            uptimeScore = if (status == NodeStatus.OPERATIONAL) 1.0 else 0.0,
         )
     }
 
