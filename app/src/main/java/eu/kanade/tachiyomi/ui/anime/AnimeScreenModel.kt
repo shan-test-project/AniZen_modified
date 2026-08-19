@@ -131,7 +131,6 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.float
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import tachiyomi.domain.anime.interactor.CalculateUserAffinity
 import tachiyomi.domain.anime.interactor.GetLibraryAnime
 import tachiyomi.domain.library.model.LibraryAnime
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -201,7 +200,6 @@ class AnimeScreenModel(
     private val getAnime: GetAnime = Injekt.get(),
     private val networkToLocalAnime: NetworkToLocalAnime = Injekt.get(),
     private val getRelatedAnime: GetRelatedAnime = Injekt.get(),
-    private val calculateUserAffinity: CalculateUserAffinity = Injekt.get(),
     private val getLibraryAnime: GetLibraryAnime = Injekt.get(),
     private val getSeasonsByAnimeId: tachiyomi.domain.anime.interactor.GetSeasonsByAnimeId = Injekt.get(),
     private val getAnimeSeasonsById: tachiyomi.domain.season.interactor.GetAnimeSeasonsById = Injekt.get(),
@@ -783,9 +781,6 @@ class AnimeScreenModel(
         fetchSuggestionsJob?.cancel()
         fetchSuggestionsJob = screenModelScope.launch(suggestionsDispatcher) {
             try {
-                // Update affinity vector in background if needed
-                calculateUserAffinity.await()
-
                 val source = sourceManager.get(anime.source) as? AnimeCatalogueSource ?: run {
                     updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
                     return@launch
