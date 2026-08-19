@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "r1JZekX3MZDgU5pTsinyd"
+uri = "file://build-artifacts/AniZen-v0.5.205-v7a-r8-debug.apk"
+type = "unspecified"
+title = "AniZen v7a R8 debug APK"
+description = "GitHub Actions artifact from successful run 32231849460. Armv7a debug APK with R8 enabled."
+logical_id = "d32d03d6-415c-4efc-b0cd-85d5e1ff7a6a"
+content_hash = "sha256:7a57b7020251e9880f6231717ee0574eb7aa810584f2114c84fa4e7949aa97d3"
+size = 89800677
+mtime_ms = 1787127950000
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0f944978-1452-4ead-b6da-8492d7ca4afb/d32d03d6-415c-4efc-b0cd-85d5e1ff7a6a/f4d45924-eac9-4bd8-84ad-60856a045ecf"
+storage_version_token = "1787128056134723"
+content_type = "application/octet-stream"
