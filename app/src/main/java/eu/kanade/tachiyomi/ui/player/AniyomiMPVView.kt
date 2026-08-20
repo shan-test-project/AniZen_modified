@@ -59,6 +59,13 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
     var isExiting = false
     var initialized = false
     private var lastAdaptiveCheckTime = 0L
+    private var userMpvConfigPath: String? = null
+    private var userMpvInputConfigPath: String? = null
+
+    fun setUserConfigFiles(mpvConfigPath: String, inputConfigPath: String) {
+        userMpvConfigPath = mpvConfigPath
+        userMpvInputConfigPath = inputConfigPath
+    }
 
     private fun getPropertyInt(property: String): Int? {
         if (!initialized) return null
@@ -301,6 +308,11 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
                 MPVLib.setPropertyString("user-data/stats/display-page", "0")
             }
         }
+
+        // BaseMPVView initializes asynchronously: loading these from PlayerActivity immediately
+        // after initialize() races initOptions(), which then overwrites the user's config.
+        userMpvConfigPath?.let { MPVLib.command(arrayOf("load-config", it)) }
+        userMpvInputConfigPath?.let { MPVLib.command(arrayOf("load-input-conf", it)) }
     }
 
     fun onKey(event: KeyEvent): Boolean {

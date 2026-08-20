@@ -532,20 +532,13 @@ class PlayerActivity : BaseActivity() {
         MPVLib.setOptionString("sub-ass-force-margins", "yes")
         MPVLib.setOptionString("sub-use-margins", "yes")
 
+        player.setUserConfigFiles(mpvConfFile.absolutePath, mpvInputFile.absolutePath)
         player.initialize(
             configDir = configDir,
             cacheDir = applicationContext.cacheDir.path,
             logLvl = logLevel,
         )
         MPVLib.setOptionString("idle", "yes")
-        // initOptions() sets AniZen's runtime defaults during initialize(). Load explicit user
-        // files after that callback and after every built-in option has been set so they win.
-        if (mpvConfFile.length() > 0) {
-            MPVLib.command(arrayOf("load-config", mpvConfFile.absolutePath))
-        }
-        if (mpvInputFile.length() > 0) {
-            MPVLib.command(arrayOf("load-input-conf", mpvInputFile.absolutePath))
-        }
         MPVLib.addLogObserver(playerObserver)
         MPVLib.addObserver(playerObserver)
     }
