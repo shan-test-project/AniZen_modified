@@ -8,11 +8,8 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import tachiyomi.domain.anime.model.toSAnime
-import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.domain.anime.interactor.GetLibraryAnime
-import tachiyomi.domain.anime.model.Anime
 import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -21,16 +18,12 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.TemporalAdjusters
 import java.util.concurrent.TimeUnit
-import kotlin.math.abs
 
 /**
- * Periodic WorkManager job that:
- *  1. Refreshes the airing schedule cache weekly.
- *  2. For episodes that have aired and match an anime already in the user's library from a
- *     favorite/pinned source, fetches that specific source's real episode list and compares its
- *     actual upload timestamp against AniList's official air time to learn a genuine per-source
- *     upload delay. Scoped to library anime only (not every source's full catalogue) so this
- *     stays fast — it never crawls every anime on every source.
+ * Monitors the Latest page of every selected favorite source.
+ *
+ * It is deliberately separate from the Feed tab: the worker uses the same source API call as
+ * Feed, but stores only compact episode identities and timestamps in a two-day rolling journal.
  */
 class ScheduleRefreshWorker(
     private val context: Context,
@@ -42,135 +35,133 @@ class ScheduleRefreshWorker(
             val schedulePrefs = Injekt.get<SchedulePreferences>()
             if (!schedulePrefs.uploadDelayEnabled().get()) return@withIOContext Result.success()
 
-            val nowEpoch = System.currentTimeMillis() / 1000L
-            val trackedSourceIds = schedulePrefs.favoriteSourceIds().get() +
-                Injekt.get<SourcePreferences>().pinnedSources().get()
-            if (trackedSourceIds.isEmpty()) return@withIOContext Result.success()
-
-            val airedEntries = fetchAiredEntries(schedulePrefs, nowEpoch)
-            if (airedEntries.isEmpty()) {
-                schedulePrefs.lastDelayCheckTime().set(nowEpoch)
+            val favoriteSourceIds = schedulePrefs.favoriteSourceIds().get()
+            if (favoriteSourceIds.isEmpty()) {
+                schedulePrefs.sourceFeedSyncStatus().set("No favorite sources selected")
                 return@withIOContext Result.success()
             }
 
-            // Bound the work to anime already in the user's library that live on a
-            // favorite/pinned source — this is the only set where we can resolve a concrete
-            // (anime, source) pair to actually query, so we never scan every source's full
-            // catalogue for every scheduled anime.
-            val libraryAnime = Injekt.get<GetLibraryAnime>().await()
-                .map { it.anime }
-                .filter { it.source.toString() in trackedSourceIds }
-            if (libraryAnime.isEmpty()) {
-                schedulePrefs.lastDelayCheckTime().set(nowEpoch)
-                return@withIOContext Result.success()
-            }
+            val recentEntries = fetchRecentEntries(schedulePrefs)
+            val result = collectSourceFeedObservations(recentEntries, favoriteSourceIds)
+            val store = SourceFeedSyncStore(context)
+            store.append(result.observations)
+            val recentObservations = store.readRecent()
 
-            val observations = collectDelayObservations(airedEntries, libraryAnime)
-            Injekt.get<UploadDelayTracker>().recordObservations(observations)
-
-            schedulePrefs.lastDelayCheckTime().set(nowEpoch)
+            Injekt.get<UploadDelayTracker>().recordFeedObservations(recentObservations)
+            schedulePrefs.lastDelayCheckTime().set(System.currentTimeMillis() / 1000L)
+            schedulePrefs.lastSourceFeedSyncTime().set(System.currentTimeMillis())
+            schedulePrefs.sourceFeedSyncStatus().set(
+                "${result.sourcesChecked}/${favoriteSourceIds.size} source(s) checked, " +
+                    "${recentObservations.size} episode observation(s) in 2-day journal" +
+                    if (result.failedSources > 0) " • ${result.failedSources} unavailable" else "",
+            )
             Result.success()
         } catch (_: Exception) {
             Result.retry()
         }
     }
 
-    /** Fetches this week's schedule and returns only the entries that aired since the last check. */
-    private suspend fun fetchAiredEntries(
+    private suspend fun fetchRecentEntries(
         schedulePrefs: SchedulePreferences,
-        nowEpoch: Long,
     ): List<AiringScheduleEntry> {
         val zone = ZoneId.systemDefault()
         val now = ZonedDateTime.now(zone)
-        val weekStart = now.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val weekStart = now.minusDays(2)
+            .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             .toLocalDate().atStartOfDay(zone)
         val weekEnd = weekStart.plusDays(7).minusSeconds(1)
-
         val entries = AiringScheduleRepository().getWeeklySchedule(
             weekStart.toEpochSecond(),
             weekEnd.toEpochSecond(),
             includeAdult = schedulePrefs.showAdultContent().get(),
         )
-
-        // Only consider episodes that aired within the last worker interval, so the same
-        // episode isn't re-checked (and the running average skewed) on every subsequent run.
-        val lastCheckTime = schedulePrefs.lastDelayCheckTime().get()
-        val windowStart = if (lastCheckTime > 0L) lastCheckTime else nowEpoch - 24 * 3600
+        val windowStart = now.minusDays(2).toEpochSecond()
+        val nowEpoch = now.toEpochSecond()
         return entries.filter { it.airingAt in windowStart..nowEpoch }
     }
 
-    /**
-     * Queries the real source episode list for each aired entry's matching library anime and
-     * returns the learned (sourceId, delayMinutes) observations. Avoids re-fetching the same
-     * source within a single run and caps total source calls so large libraries can't make the
-     * background worker exceed its WorkManager window. This is a soft cap; the per-source
-     * observations are still written so the learning keeps improving over subsequent runs.
-     */
-    private suspend fun collectDelayObservations(
+    private suspend fun collectSourceFeedObservations(
         airedEntries: List<AiringScheduleEntry>,
-        libraryAnime: List<Anime>,
-    ): List<Pair<String, Long>> {
+        sourceIds: Set<String>,
+    ): FeedObservationResult {
+        if (airedEntries.isEmpty()) return FeedObservationResult(emptyList(), 0, 0)
+
         val sourceManager = Injekt.get<SourceManager>()
-        val observations = mutableListOf<Pair<String, Long>>()
-        val alreadyQueriedSources = mutableSetOf<Long>()
-        var sourceCallsThisRun = 0
+        val observations = mutableListOf<SourceFeedObservation>()
+        var sourceCalls = 0
+        var sourcesChecked = 0
+        var failedSources = 0
 
-        for (entry in airedEntries) {
-            if (sourceCallsThisRun >= MAX_SOURCE_CALLS_PER_RUN) break
-            val matches = matchingLibraryAnime(entry, libraryAnime)
-            for (anime in matches) {
-                if (!alreadyQueriedSources.add(anime.source)) continue
-                if (sourceCallsThisRun >= MAX_SOURCE_CALLS_PER_RUN) break
-                sourceCallsThisRun++
+        for (sourceId in sourceIds) {
+            if (sourceCalls++ >= MAX_SOURCE_CALLS_PER_RUN) break
+            val source = sourceManager.get(sourceId.toLongOrNull() ?: continue) as? AnimeCatalogueSource
+                ?: continue
+            val latestAnimeResult = runCatching {
+                source.getLatestUpdates(1).animes.take(MAX_LATEST_ANIME_PER_SOURCE)
+            }
+            val latestAnime = latestAnimeResult.getOrElse {
+                failedSources++
+                emptyList()
+            }
+            if (latestAnimeResult.isSuccess) sourcesChecked++
 
-                observeUploadDelay(sourceManager, anime, entry)?.let { delayMinutes ->
-                    observations.add(anime.source.toString() to delayMinutes)
+            for (anime in latestAnime) {
+                val episodes = runCatching { source.getEpisodeList(anime) }.getOrNull().orEmpty()
+                for (episode in episodes) {
+                    if (episode.date_upload <= 0L) continue
+                    val entry = airedEntries.firstOrNull {
+                        it.episode.toFloat() == episode.episode_number &&
+                            titlesMatch(it, anime.title)
+                    } ?: continue
+
+                    val sourceUploadAt = episode.date_upload / 1000L
+                    val delayMinutes = (sourceUploadAt - entry.airingAt) / 60L
+                    if (delayMinutes !in MIN_DELAY_MINUTES..MAX_DELAY_MINUTES) continue
+
+                    observations += SourceFeedObservation(
+                        eventId = "$sourceId|${anime.url}|${episode.url}",
+                        sourceId = sourceId,
+                        episodeId = episode.url,
+                        episodeNumber = episode.episode_number,
+                        officialAirAt = entry.airingAt,
+                        sourceUploadAt = sourceUploadAt,
+                    )
                 }
             }
         }
-        return observations
+        return FeedObservationResult(observations, sourcesChecked, failedSources)
     }
 
-    private fun matchingLibraryAnime(
-        entry: AiringScheduleEntry,
-        libraryAnime: List<Anime>,
-    ): List<Anime> {
-        val titleCandidates = listOfNotNull(
+    private fun titlesMatch(entry: AiringScheduleEntry, sourceTitle: String): Boolean {
+        val source = normalizeTitle(sourceTitle)
+        return listOfNotNull(
             entry.titleUserPreferred,
             entry.titleEnglish,
             entry.titleRomaji,
             entry.titleNative,
-        ).map { it.trim().lowercase() }.toSet()
-        return libraryAnime.filter { it.title.trim().lowercase() in titleCandidates }
+        ).map(::normalizeTitle).any { candidate ->
+            candidate == source || candidate.contains(source) || source.contains(candidate)
+        }
     }
 
-    /** Fetches [anime]'s real episode list from its source and returns a plausible delay in minutes, if any. */
-    private suspend fun observeUploadDelay(
-        sourceManager: SourceManager,
-        anime: Anime,
-        entry: AiringScheduleEntry,
-    ): Long? {
-        val source = sourceManager.get(anime.source) ?: return null
-        val episodes = runCatching { source.getEpisodeList(anime.toSAnime()) }.getOrNull() ?: return null
-        val matchingEpisode = episodes.firstOrNull { abs(it.episode_number - entry.episode) < 0.01f } ?: return null
-        val uploadDate = matchingEpisode.date_upload
-        if (uploadDate <= 0L) return null
+    private fun normalizeTitle(value: String) =
+        value.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
 
-        val delayMinutes = (uploadDate / 1000L - entry.airingAt) / 60L
-        // Discard implausible outliers (source's clock/metadata far off, or the episode
-        // predates this air date entirely) rather than let them corrupt the running average.
-        return delayMinutes.takeIf { it in -60L..(24 * 60) }
-    }
+    private data class FeedObservationResult(
+        val observations: List<SourceFeedObservation>,
+        val sourcesChecked: Int,
+        val failedSources: Int,
+    )
 
     companion object {
         private const val WORK_NAME = "ScheduleRefreshWorker"
         private const val MAX_SOURCE_CALLS_PER_RUN = 12
+        private const val MAX_LATEST_ANIME_PER_SOURCE = 12
+        private const val MIN_DELAY_MINUTES = -60L
+        private const val MAX_DELAY_MINUTES = 24L * 60L
 
         fun schedule(context: Context, interval: SchedulePreferences.UploadDelayInterval) {
             val wm = WorkManager.getInstance(context)
-            // NEVER: user wants no background refresh at all. CUSTOM: the user supplies a fixed
-            // manual delay instead of an auto-learned one, so there is nothing for this worker
-            // to learn — cancel any existing periodic job rather than scheduling one.
             if (
                 interval == SchedulePreferences.UploadDelayInterval.NEVER ||
                 interval == SchedulePreferences.UploadDelayInterval.CUSTOM
@@ -192,13 +183,6 @@ class ScheduleRefreshWorker(
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
-                        // Explicitly does NOT require battery-not-low / device-idle, so this
-                        // still runs on a low battery or when the device is actively in use —
-                        // it is only gated on network availability. WorkManager may still defer
-                        // execution slightly under Doze regardless of the app's own
-                        // "unrestricted background battery usage" setting; that ceiling can only
-                        // be fully removed by running as a foreground service, which isn't
-                        // appropriate for a periodic background sync like this.
                         .build(),
                 )
                 .build()
