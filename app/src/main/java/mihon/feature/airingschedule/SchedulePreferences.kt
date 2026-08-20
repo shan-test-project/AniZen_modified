@@ -62,6 +62,16 @@ class SchedulePreferences(
         0L,
     )
 
+    fun lastSourceFeedSyncTime() = preferenceStore.getLong(
+        "schedule_last_source_feed_sync_time",
+        0L,
+    )
+
+    fun sourceFeedSyncStatus() = preferenceStore.getString(
+        "schedule_source_feed_sync_status",
+        "",
+    )
+
     fun autoAddFromPinnedSources() = preferenceStore.getBoolean(
         "schedule_auto_add_from_pinned_sources",
         false,
