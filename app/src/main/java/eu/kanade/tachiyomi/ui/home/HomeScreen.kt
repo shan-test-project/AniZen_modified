@@ -404,11 +404,18 @@ object HomeScreen : Screen() {
             NavigationBarItem(
                 selected = selected,
                 onClick = onClick,
-                modifier = Modifier.combinedClickable(
-                    onLongClick = onLongClick,
-                    onDoubleClick = onDoubleClick,
-                    onClick = onClick
-                ),
+                modifier = if (
+                    behavior.onLongClick != NavAction.Default ||
+                    behavior.onDoubleTap != NavAction.Default
+                ) {
+                    Modifier.combinedClickable(
+                        onLongClick = onLongClick,
+                        onDoubleClick = onDoubleClick,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                },
                 icon = { NavigationIconItem(navItem, adaptiveDecision, updatesCount, extensionUpdatesCount) },
                 label = label,
                 alwaysShowLabel = navLabelVisibility == NavLabelVisibility.ALWAYS,
@@ -496,11 +503,18 @@ object HomeScreen : Screen() {
         NavigationRailItem(
             selected = selected,
             onClick = onClick,
-            modifier = Modifier.combinedClickable(
-                onLongClick = onLongClick,
-                onDoubleClick = onDoubleClick,
-                onClick = combinedClick
-            ),
+            modifier = if (
+                behavior.onLongClick != NavAction.Default ||
+                    behavior.onDoubleTap != NavAction.Default
+            ) {
+                Modifier.combinedClickable(
+                    onLongClick = onLongClick,
+                    onDoubleClick = onDoubleClick,
+                    onClick = combinedClick,
+                )
+            } else {
+                Modifier
+            },
             icon = { NavigationIconItem(navItem, adaptiveDecision, updatesCount, extensionUpdatesCount) },
             label = label,
             alwaysShowLabel = navLabelVisibility == NavLabelVisibility.ALWAYS,
