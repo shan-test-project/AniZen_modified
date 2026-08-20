@@ -190,12 +190,6 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         MPVLib.setOptionString("dscale", scaler)
         MPVLib.setOptionString("dither", if (isHighQuality) "fruit" else "no")
 
-        when (decoderPreferences.videoDebanding().get()) {
-            Debanding.None -> {}
-            Debanding.CPU -> MPVLib.setOptionString("vf", "gradfun=radius=12")
-            Debanding.GPU -> MPVLib.setOptionString("deband", "yes")
-        }
-
         val smoothMotionEnabled = decoderPreferences.smoothMotion().get()
         val displayRefreshRate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             context.display?.refreshRate ?: 60f
@@ -248,6 +242,10 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         if (decoderPreferences.useYUV420P().get()) {
             MPVLib.setOptionString("vf", "format=yuv420p")
         }
+
+        // Match Anikku's debanding behavior while retaining AniZen's configurable GPU values.
+        // The named CPU filter avoids replacing the optional YUV420P filter chain.
+        applyDebandMode(decoderPreferences.videoDebanding().get(), decoderPreferences)
 
         if (decoderPreferences.enableAnime4K().get()) {
             anime4kManager.initialize()
