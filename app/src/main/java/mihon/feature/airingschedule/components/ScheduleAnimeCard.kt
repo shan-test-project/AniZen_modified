@@ -78,10 +78,9 @@ fun ScheduleAnimeCard(
 
     // A user-supplied custom delay (Refresh interval → Custom) overrides the auto-learned
     // per-source delay when computing the expected upload time and countdown.
-    val effectiveDelay: Long? = remember(manualDelayMinutes, sourceDelays, pinnedSourceIds, favoriteSourceIds) {
+    val effectiveDelay: Long? = remember(manualDelayMinutes, sourceDelays, favoriteSourceIds) {
         manualDelayMinutes
-            ?: pinnedSourceIds.firstNotNullOfOrNull { sourceDelays[it] }
-            ?: favoriteSourceIds.firstNotNullOfOrNull { sourceDelays[it] }
+            ?: favoriteSourceIds.mapNotNull { sourceDelays[it] }.maxOrNull()
     }
 
     val adjustedAiringAt = effectiveDelay?.let { UploadDelayTracker.adjustedAirTime(entry.airingAt, it) }

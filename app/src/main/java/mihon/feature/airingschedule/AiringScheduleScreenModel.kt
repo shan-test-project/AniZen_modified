@@ -67,6 +67,7 @@ class AiringScheduleScreenModel : StateScreenModel<AiringScheduleScreenModel.Sta
                 schedulePrefs.autoAddFromPinnedSources().changes(),
                 schedulePrefs.uploadDelayRefreshInterval().changes(),
                 schedulePrefs.customUploadDelayMinutes().changes(),
+                schedulePrefs.sourceUploadDelays().changes(),
             ) { _ -> Unit }.collectLatest {
                 if (hasLoaded) applyFilters()
             }
@@ -177,9 +178,8 @@ class AiringScheduleScreenModel : StateScreenModel<AiringScheduleScreenModel.Sta
     }
 
     /**
-     * The delay-adjusted air time using only that entry's own matched sources (pinned sources
-     * take priority over plain favourites, unless a manual override is active), instead of one
-     * global delay applied to every unrelated entry.
+     * The largest learned delay from the selected favourite sources is applied globally. This
+     * prevents a fast source's delay from hiding a slower source's upload time.
      */
     private fun priorityDelayFor(
         matchedSources: Set<String>,
@@ -189,14 +189,10 @@ class AiringScheduleScreenModel : StateScreenModel<AiringScheduleScreenModel.Sta
         favoriteIds: Set<String>,
     ): Long? {
         manualDelayMinutes?.let { return it }
-        if (delays.isEmpty() || matchedSources.isEmpty()) return null
-        for (sourceId in pinnedSources) {
-            if (sourceId in matchedSources) delays[sourceId]?.let { return it }
-        }
-        for (sourceId in favoriteIds) {
-            if (sourceId in matchedSources) delays[sourceId]?.let { return it }
-        }
-        return null
+        if (delays.isEmpty()) return null
+        return favoriteIds.asSequence()
+            .mapNotNull { delays[it] }
+            .maxOrNull()
     }
 
     private fun filterEntries(

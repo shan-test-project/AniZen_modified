@@ -47,7 +47,14 @@ class ScheduleRefreshWorker(
             store.append(result.observations)
             val recentObservations = store.readRecent()
 
-            Injekt.get<UploadDelayTracker>().recordFeedObservations(recentObservations)
+            val intervalMinutes = schedulePrefs.uploadDelayRefreshInterval().get().minutes
+            val delayChanged = Injekt.get<UploadDelayTracker>().recordFeedObservations(
+                recentObservations,
+                intervalMinutes,
+            )
+            if (delayChanged) {
+                ScheduleDataRefreshWorker.refreshNow(context)
+            }
             schedulePrefs.lastDelayCheckTime().set(System.currentTimeMillis() / 1000L)
             schedulePrefs.lastSourceFeedSyncTime().set(System.currentTimeMillis())
             schedulePrefs.sourceFeedSyncStatus().set(
@@ -156,7 +163,7 @@ class ScheduleRefreshWorker(
     companion object {
         private const val WORK_NAME = "ScheduleRefreshWorker"
         private const val MAX_SOURCE_CALLS_PER_RUN = 12
-        private const val MAX_LATEST_ANIME_PER_SOURCE = 12
+        private const val MAX_LATEST_ANIME_PER_SOURCE = 50
         private const val MIN_DELAY_MINUTES = -60L
         private const val MAX_DELAY_MINUTES = 24L * 60L
 

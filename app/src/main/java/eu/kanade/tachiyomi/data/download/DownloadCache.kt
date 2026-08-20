@@ -194,6 +194,21 @@ class DownloadCache(
     }
 
     /**
+     * Counts several anime from one cache snapshot. Library rendering can request this for every
+     * card, so renewing the filesystem cache once per card causes visible scrolling stalls.
+     */
+    fun getDownloadCounts(animes: List<Anime>): Map<Long, Int> {
+        renewCache()
+        return animes.associate { anime ->
+            anime.id to (
+                rootDownloadsDir.sourceDirs[anime.source]
+                    ?.animeDirs?.get(provider.getAnimeDirName(anime.ogTitle))
+                    ?.episodeDirs?.size ?: 0
+                )
+        }
+    }
+
+    /**
      * Returns the total size of downloaded episodes.
      */
     fun getTotalDownloadSize(): Long {
