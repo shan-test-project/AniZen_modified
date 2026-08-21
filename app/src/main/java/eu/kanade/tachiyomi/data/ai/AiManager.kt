@@ -340,7 +340,7 @@ class AiManager(
             - General: Settings > General
             - Appearance: Settings > Appearance (Theme, Monet, Dark Mode)
             - Library: Settings > Library (Update intervals, Columns)
-            - Player: Settings > Player (Shaders/Anime4K, Orientation, Subtitles, External Player)
+            - Player: Settings > Player (MPV decoder, orientation, subtitles, external player)
             - Downloads: Settings > Downloads (Threads, Cache)
             - Tracking: Settings > Tracking (Anilist, MAL)
             - Advanced: Settings > Advanced (Log viewer, Cache, Database)
