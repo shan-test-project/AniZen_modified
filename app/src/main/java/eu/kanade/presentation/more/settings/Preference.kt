@@ -18,6 +18,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.File
 import java.io.FileOutputStream
 import tachiyomi.core.common.preference.Preference as PreferenceData
 
@@ -184,6 +185,9 @@ sealed class Preference {
             override val enabled: Boolean = true,
             override val onValueChanged: suspend (newValue: String) -> Boolean = { newValue ->
                 if (fileName != null) {
+                    // Always keep a private copy in sync. This is the active config directory
+                    // on devices without all-files access and is also used on next player start.
+                    File(context.filesDir, fileName).writeText(newValue)
                     val storageManager: StorageManager = Injekt.get()
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
                         val inputFile = storageManager.getMPVConfigDirectory()
@@ -194,8 +198,8 @@ sealed class Preference {
                                     writer.write(newValue)
                                 }
                             }
-                        pref.set(newValue)
                     }
+                    pref.set(newValue)
                 }
                 true
             },
