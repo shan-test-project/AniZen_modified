@@ -191,43 +191,6 @@ sealed class PlayerUpdates {
     data class VideoZoom(val zoom: Float) : PlayerUpdates()
 }
 
-enum class DebandSettings(
-    val titleRes: StringResource,
-    val preference: (DecoderPreferences) -> Preference<Int>,
-    val mpvProperty: String,
-    val start: Int,
-    val end: Int,
-) {
-    ITERATIONS(
-        MR.strings.pref_debanding_title,
-        { it.debandFilter() },
-        "deband-iterations",
-        start = 0,
-        end = 16,
-    ),
-    THRESHOLD(
-        MR.strings.player_sheets_deband_threshold,
-        { it.debandThreshold() },
-        "deband-threshold",
-        start = 0,
-        end = 200,
-    ),
-    RANGE(
-        MR.strings.player_sheets_deband_range,
-        { it.debandRange() },
-        "deband-range",
-        start = 1,
-        end = 64,
-    ),
-    GRAIN(
-        MR.strings.player_sheets_filters_grain,
-        { it.grainFilter() },
-        "deband-grain",
-        start = 0,
-        end = 200,
-    ),
-}
-
 enum class VideoFilters(
     val titleRes: StringResource,
     val preference: (DecoderPreferences) -> Preference<Int>,
@@ -259,13 +222,6 @@ enum class VideoFilters(
         MR.strings.player_sheets_filters_hue,
         { it.hueFilter() },
         "hue",
-    ),
-    SHARPEN(
-        MR.strings.player_sheets_filters_sharpen,
-        { it.sharpenFilter() },
-        "sharpen",
-        min = -5,
-        max = 5,
     ),
 }
 
