@@ -5,9 +5,12 @@ import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.Data
 import androidx.work.WorkRequest
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +39,8 @@ class ScheduleDataRefreshWorker(
         try {
             val schedulePrefs = Injekt.get<SchedulePreferences>()
 
-            if (!schedulePrefs.scheduleAutoRefreshEnabled().get()) {
+            val forceRefresh = inputData.getBoolean(INPUT_FORCE_REFRESH, false)
+            if (!forceRefresh && !schedulePrefs.scheduleAutoRefreshEnabled().get()) {
                 return@withContext Result.success()
             }
 
@@ -103,6 +107,24 @@ class ScheduleDataRefreshWorker(
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
         }
+
+        fun refreshNow(context: Context) {
+            val request = OneTimeWorkRequestBuilder<ScheduleDataRefreshWorker>()
+                .setInputData(Data.Builder().putBoolean(INPUT_FORCE_REFRESH, true).build())
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build(),
+                )
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "ScheduleDataRefreshWorker.immediate",
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+        }
+
+        private const val INPUT_FORCE_REFRESH = "force_refresh"
 
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)

@@ -7,7 +7,15 @@ class SchedulePreferences(
     private val preferenceStore: PreferenceStore,
 ) {
     enum class TitleLanguage { USER_PREFERRED, ENGLISH, ROMAJI, NATIVE }
-    enum class UploadDelayInterval { THIRTY_MIN, ONE_HOUR, TWO_HOURS, SIX_HOURS, TWELVE_HOURS, CUSTOM, NEVER }
+    enum class UploadDelayInterval(val minutes: Long) {
+        THIRTY_MIN(30),
+        ONE_HOUR(60),
+        TWO_HOURS(120),
+        SIX_HOURS(360),
+        TWELVE_HOURS(720),
+        CUSTOM(0),
+        NEVER(0),
+    }
     enum class AutoRefreshFrequency { EVERY_1_DAY, EVERY_2_DAYS, EVERY_3_DAYS, EVERY_4_DAYS, EVERY_5_DAYS, EVERY_6_DAYS, EVERY_7_DAYS }
 
     fun favoriteSourceIds() = preferenceStore.getStringSet(
@@ -60,6 +68,16 @@ class SchedulePreferences(
     fun lastDelayCheckTime() = preferenceStore.getLong(
         "schedule_last_delay_check_time",
         0L,
+    )
+
+    fun lastSourceFeedSyncTime() = preferenceStore.getLong(
+        "schedule_last_source_feed_sync_time",
+        0L,
+    )
+
+    fun sourceFeedSyncStatus() = preferenceStore.getString(
+        "schedule_source_feed_sync_status",
+        "",
     )
 
     fun autoAddFromPinnedSources() = preferenceStore.getBoolean(

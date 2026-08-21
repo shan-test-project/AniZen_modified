@@ -511,6 +511,12 @@ class LibraryScreenModel(
             libraryPreferences.animeFolderMap().changes(),
             downloadCache.changes.debounce(500L),
         ) { libraryMangaList, prefs, sources, folderMapStringSet, _ ->
+            val sourcesById = sources.associateBy { it.first.id }
+            val downloadCounts = if (prefs.downloadBadge) {
+                downloadCache.getDownloadCounts(libraryMangaList.map { it.anime })
+            } else {
+                emptyMap()
+            }
             val animeSourceUrlMap = libraryMangaList.associate { (it.anime.source to it.anime.url) to it.id }
             val folderMap = mutableMapOf<Long, Long>()
             for (item in folderMapStringSet) {
@@ -537,7 +543,7 @@ class LibraryScreenModel(
                     LibraryItem(
                         mangaWithFolder,
                         downloadCount = if (prefs.downloadBadge) {
-                            downloadManager.getDownloadCount(mangaWithFolder.anime).toLong()
+                            downloadCounts[mangaWithFolder.anime.id]?.toLong() ?: 0L
                         } else {
                             0
                         },
@@ -550,7 +556,7 @@ class LibraryScreenModel(
                         },
                         showSourceIcon = prefs.showSourceIcon,
                         showLanguageIcon = prefs.showLanguageIcon,
-                        domainSource = sources.find { it.first.id == mangaWithFolder.anime.source }?.first,
+                        domainSource = sourcesById[mangaWithFolder.anime.source]?.first,
                     )
                 }
                 .groupBy { it.libraryAnime.category }

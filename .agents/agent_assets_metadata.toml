@@ -1,0 +1,30 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "r1JZekX3MZDgU5pTsinyd"
+uri = "file://build-artifacts/AniZen-v0.5.205-v7a-r8-debug.apk"
+type = "unspecified"
+title = "AniZen v7a R8 debug APK"
+description = "GitHub Actions artifact from successful run 32231849460. Armv7a debug APK with R8 enabled."
+logical_id = "d32d03d6-415c-4efc-b0cd-85d5e1ff7a6a"
+content_hash = "sha256:7a57b7020251e9880f6231717ee0574eb7aa810584f2114c84fa4e7949aa97d3"
+size = 89800677
+mtime_ms = 1787127950000
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0f944978-1452-4ead-b6da-8492d7ca4afb/d32d03d6-415c-4efc-b0cd-85d5e1ff7a6a/f4d45924-eac9-4bd8-84ad-60856a045ecf"
+storage_version_token = "1787128056134723"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "AAY1stlxpasHhnRnQZoRI"
+uri = "file://build-artifacts-preview/AniZen-v0.5.205-v7a-r8-debug.apk"
+type = "unspecified"
+title = "AniZen optimized v7a R8 debug preview APK"
+description = "Fresh non-Release APK from successful GitHub Actions run 32327081523 after navigation performance optimization."
+logical_id = "05c132d0-531f-4d75-a587-e5dfee732187"
+content_hash = "sha256:6fe2b1269cf278f46bde167344fe5d0da3357ec60dd4e0d7c637315eb93bc536"
+size = 89800677
+mtime_ms = 1787195736000
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0f944978-1452-4ead-b6da-8492d7ca4afb/05c132d0-531f-4d75-a587-e5dfee732187/f531b583-cc08-466e-97d0-444f7009c037"
+storage_version_token = "1787195832357893"
+content_type = "application/octet-stream"

@@ -72,6 +72,32 @@ class UploadDelayTracker {
         saveDelays(delays)
     }
 
+    /**
+     * Uses the largest plausible delay observed in the two-day source-feed journal.
+     * The schedule feature intentionally uses the slowest observed source upload so a user
+     * does not get an early "available" estimate when a source publishes inconsistently.
+     */
+    fun recordFeedObservations(
+        observations: List<SourceFeedObservation>,
+        intervalMinutes: Long,
+    ): Boolean {
+        if (observations.isEmpty()) return false
+        val now = System.currentTimeMillis() / 1000L
+        val windowStart = now - (intervalMinutes * 60L)
+        val delays = observations
+            .asSequence()
+            .filter { it.sourceUploadAt in windowStart..now }
+            .filter { it.delayMinutes in -60L..(24 * 60L) }
+            .groupBy { it.sourceId }
+            .mapValues { (_, values) -> values.maxOf { it.delayMinutes } }
+        if (delays.isEmpty()) return false
+        val previous = getDelays()
+        val updated = previous.toMutableMap().apply { putAll(delays) }
+        if (previous == updated) return false
+        saveDelays(updated)
+        return true
+    }
+
     /** Clears the stored delay for a source. */
     fun clearDelay(sourceId: String) {
         val delays = getDelays().toMutableMap()

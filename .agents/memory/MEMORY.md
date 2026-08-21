@@ -1,0 +1,2 @@
+- [GitHub Actions fallback](github-actions-publishing.md) — when Git transport rejects an otherwise valid GitHub token, publish commits through the Git Database API and dispatch Actions via REST.
+- [AniZen MPV configuration](mpv-config-precedence.md) — persist editor values unconditionally and let MPV load config files through its configured config directory.

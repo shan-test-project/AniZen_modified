@@ -9,6 +9,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import eu.kanade.domain.extension.interactor.GetExtensionsByType
 import eu.kanade.presentation.more.settings.Preference
 import kotlinx.collections.immutable.persistentListOf
@@ -16,6 +19,7 @@ import kotlinx.collections.immutable.toImmutableMap
 import mihon.feature.airingschedule.ScheduleDataRefreshWorker
 import mihon.feature.airingschedule.SchedulePreferences
 import mihon.feature.airingschedule.ScheduleRefreshWorker
+import mihon.feature.airingschedule.UploadDelayTracker
 import mihon.feature.airingschedule.notification.ScheduleNotifications
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -46,6 +50,13 @@ object SettingsScheduleScreen : SearchableSettings {
         val uploadDelayInterval by uploadDelayIntervalPref.changes().collectAsState(initial = uploadDelayIntervalPref.get())
         val customUploadDelayPref = schedulePreferences.customUploadDelayMinutes()
         val customUploadDelay by customUploadDelayPref.changes().collectAsState(initial = customUploadDelayPref.get())
+        val favoriteSourceIdsPref = schedulePreferences.favoriteSourceIds()
+        val favoriteSourceIds by favoriteSourceIdsPref.changes().collectAsState(initial = favoriteSourceIdsPref.get())
+        val syncStatusPref = schedulePreferences.sourceFeedSyncStatus()
+        val syncStatus by syncStatusPref.changes().collectAsState(initial = syncStatusPref.get())
+        val lastSyncPref = schedulePreferences.lastSourceFeedSyncTime()
+        val lastSync by lastSyncPref.changes().collectAsState(initial = lastSyncPref.get())
+        val learnedDelays = remember(syncStatus) { Injekt.get<UploadDelayTracker>().getDelays() }
 
         LaunchedEffect(autoRefreshEnabled, autoRefreshFrequency) {
             if (autoRefreshEnabled) {
@@ -165,6 +176,15 @@ object SettingsScheduleScreen : SearchableSettings {
                         enabled = uploadDelayInterval == SchedulePreferences.UploadDelayInterval.CUSTOM,
                         onValueChanged = { it.trim().toLongOrNull()?.let { minutes -> minutes in -24 * 60..24 * 60 } ?: false },
                     ),
+                    Preference.PreferenceItem.InfoPreference(
+                        title = currentSyncSummary(
+                            enabled = uploadDelayEnabled,
+                            selectedSources = favoriteSourceIds.size,
+                            status = syncStatus,
+                            lastSync = lastSync,
+                            learnedDelays = learnedDelays,
+                        ),
+                    ),
                 ),
             ),
             Preference.PreferenceGroup(
@@ -209,5 +229,27 @@ object SettingsScheduleScreen : SearchableSettings {
                 ),
             ),
         )
+    }
+
+    private fun currentSyncSummary(
+        enabled: Boolean,
+        selectedSources: Int,
+        status: String,
+        lastSync: Long,
+        learnedDelays: Map<String, Long>,
+    ): String {
+        if (!enabled) return "Source feed monitoring is off. Enable Auto-sync to learn upload times."
+        if (selectedSources == 0) return "Source feed monitoring is waiting: select at least one favorite source above."
+        val lastSyncText = if (lastSync > 0L) {
+            Instant.ofEpochMilli(lastSync)
+                .atZone(ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))
+        } else {
+            "not yet"
+        }
+        val delayText = learnedDelays.values.maxOrNull()?.let { "${it} min maximum learned delay" }
+            ?: "no delay learned yet"
+        return "Live monitor: ${status.ifBlank { "waiting for first background sync" }}. " +
+            "Last sync: $lastSyncText. Currently applying $delayText to schedule times."
     }
 }
