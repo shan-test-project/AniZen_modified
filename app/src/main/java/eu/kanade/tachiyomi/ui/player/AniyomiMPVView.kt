@@ -43,6 +43,7 @@ import `is`.xyz.mpv.MPVLib
 import logcat.LogPriority
 import logcat.logcat
 import uy.kohesive.injekt.injectLazy
+import java.io.File
 import kotlin.reflect.KProperty
 
 class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(context, attributes) {
@@ -311,8 +312,12 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
 
         // BaseMPVView initializes asynchronously: loading these from PlayerActivity immediately
         // after initialize() races initOptions(), which then overwrites the user's config.
-        userMpvConfigPath?.let { MPVLib.command(arrayOf("load-config", it)) }
-        userMpvInputConfigPath?.let { MPVLib.command(arrayOf("load-input-conf", it)) }
+        userMpvConfigPath
+            ?.takeIf { File(it).length() > 0L }
+            ?.let { MPVLib.command(arrayOf("load-config", it)) }
+        userMpvInputConfigPath
+            ?.takeIf { File(it).length() > 0L }
+            ?.let { MPVLib.command(arrayOf("load-input-conf", it)) }
     }
 
     fun onKey(event: KeyEvent): Boolean {
