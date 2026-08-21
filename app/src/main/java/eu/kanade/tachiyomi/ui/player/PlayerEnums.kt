@@ -223,6 +223,13 @@ enum class VideoFilters(
         { it.hueFilter() },
         "hue",
     ),
+    SHARPEN(
+        MR.strings.player_sheets_filters_sharpen,
+        { it.sharpenFilter() },
+        "sharpen",
+        min = -5,
+        max = 5,
+    ),
 }
 
 enum class VideoFilterTheme(
