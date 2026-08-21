@@ -532,7 +532,6 @@ class PlayerActivity : BaseActivity() {
         MPVLib.setOptionString("sub-ass-force-margins", "yes")
         MPVLib.setOptionString("sub-use-margins", "yes")
 
-        player.setUserConfigFiles(mpvConfFile.absolutePath, mpvInputFile.absolutePath)
         player.initialize(
             configDir = configDir,
             cacheDir = applicationContext.cacheDir.path,

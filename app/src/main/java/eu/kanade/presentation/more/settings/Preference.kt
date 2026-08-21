@@ -198,8 +198,8 @@ sealed class Preference {
                                     writer.write(newValue)
                                 }
                             }
-                        pref.set(newValue)
                     }
+                    pref.set(newValue)
                 }
                 true
             },
