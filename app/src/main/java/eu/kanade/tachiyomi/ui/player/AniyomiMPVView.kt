@@ -154,7 +154,10 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         MPVLib.setOptionString("screenshot-directory", screenshotDir.path)
 
         VideoFilters.entries.forEach {
-            MPVLib.setOptionString(it.mpvProperty, it.preference(decoderPreferences).get().toString())
+            val value = it.preference(decoderPreferences).get()
+            if (value != 0) {
+                MPVLib.setOptionString(it.mpvProperty, value.toString())
+            }
         }
 
         MPVLib.setOptionString("speed", playerPreferences.playerSpeed().get().toString())
