@@ -144,7 +144,6 @@ class PlayerActivity : BaseActivity() {
         PowerManager.OnThermalStatusChangedListener { status ->
             if (status >= 3 && status != lastThermalStatus) { // 3 = PowerManager.THERMAL_STATUS_THROTTLING
                 lastThermalStatus = status
-                player.checkAdaptiveScaling(Long.MAX_VALUE) // Force check on thermal event
             }
         }
     } else {
@@ -439,15 +438,11 @@ class PlayerActivity : BaseActivity() {
             finishAndRemoveTask()
         }
 
-        player.shrinkCache()
         super.onStop()
     }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= TRIM_MEMORY_BACKGROUND || level == TRIM_MEMORY_RUNNING_CRITICAL) {
-            player.shrinkCache()
-        }
     }
 
     @SuppressLint("MissingSuperCall")
@@ -740,7 +735,6 @@ class PlayerActivity : BaseActivity() {
 
     override fun onResume() {
         if (player.initialized && player.paused == false) {
-            player.restoreCache()
         }
         // Reconectar Cast si estaba activo
         castManager.apply {
@@ -795,7 +789,6 @@ class PlayerActivity : BaseActivity() {
             "video-bitrate" -> PlayerStats.videoBitrate.value = value
             "vo-delayed-frame-count" -> {
                 PlayerStats.delayedFrames.value = value
-                player.checkAdaptiveScaling(value)
             }
             "vo-passes" -> PlayerStats.voPasses.value = value
             "paused-for-cache" -> {
@@ -981,7 +974,6 @@ class PlayerActivity : BaseActivity() {
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         if (!isInPictureInPictureMode) {
-            player.restoreCache()
             pipReceiver?.let {
                 unregisterReceiver(pipReceiver)
                 pipReceiver = null
