@@ -84,6 +84,7 @@ android {
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks.add(debug.name)
         }
         val release by getting {
