@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import mihon.feature.airingschedule.components.BellNotifyState
 import mihon.feature.airingschedule.notification.ScheduleNotifications
 import tachiyomi.domain.anime.interactor.GetLibraryAnime
+import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.time.DayOfWeek
@@ -28,6 +29,7 @@ class AiringScheduleScreenModel : StateScreenModel<AiringScheduleScreenModel.Sta
     private val uploadDelayTracker: UploadDelayTracker = Injekt.get()
     private val application: Application = Injekt.get()
     private val getLibraryAnime: GetLibraryAnime = Injekt.get()
+    private val sourceManager: SourceManager = Injekt.get()
 
     private var allEntries: List<AiringScheduleEntry> = emptyList()
     private var hasLoaded = false
@@ -40,7 +42,11 @@ class AiringScheduleScreenModel : StateScreenModel<AiringScheduleScreenModel.Sta
 
     private fun observeLibrary() {
         screenModelScope.launch {
-            getLibraryAnime.subscribe().collectLatest { libraryAnime ->
+            combine(
+                getLibraryAnime.subscribe(),
+                sourceManager.catalogueSources,
+            ) { libraryAnime, catalogueSources ->
+                val installedCatalogueSourceIds = catalogueSources.map { it.id }.toSet()
                 val titles = libraryAnime.map { lib ->
                     lib.anime.title.trim().lowercase()
                 }.toSet()
@@ -51,7 +57,22 @@ class AiringScheduleScreenModel : StateScreenModel<AiringScheduleScreenModel.Sta
                 val sourcesByTitle = libraryAnime
                     .groupBy({ it.anime.title.trim().lowercase() }, { it.anime.source.toString() })
                     .mapValues { it.value.toSet() }
-                mutableState.update { it.copy(libraryAnimeTitles = titles, librarySourcesByTitle = sourcesByTitle) }
+                // Only expose IDs from installed catalogue extensions. A library anime from
+                // an unavailable source must continue through global search instead of opening
+                // a details screen that cannot load its source.
+                val openableAnimeIdsByTitle = libraryAnime
+                    .filter { it.anime.source in installedCatalogueSourceIds }
+                    .groupBy { it.anime.title.trim().lowercase() }
+                    .mapValues { (_, anime) -> anime.first().anime.id }
+                Triple(titles, sourcesByTitle, openableAnimeIdsByTitle)
+            }.collectLatest { (titles, sourcesByTitle, openableAnimeIdsByTitle) ->
+                mutableState.update {
+                    it.copy(
+                        libraryAnimeTitles = titles,
+                        librarySourcesByTitle = sourcesByTitle,
+                        openableAnimeIdsByTitle = openableAnimeIdsByTitle,
+                    )
+                }
                 applyFilters()
             }
         }
@@ -363,5 +384,6 @@ class AiringScheduleScreenModel : StateScreenModel<AiringScheduleScreenModel.Sta
         val notifySeriesMediaIds: Set<String> = emptySet(),
         val libraryAnimeTitles: Set<String> = emptySet(),
         val librarySourcesByTitle: Map<String, Set<String>> = emptyMap(),
+        val openableAnimeIdsByTitle: Map<String, Long> = emptyMap(),
     )
 }

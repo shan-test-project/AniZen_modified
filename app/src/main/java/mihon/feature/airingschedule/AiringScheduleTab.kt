@@ -46,6 +46,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.more.settings.screen.SettingsScheduleScreen
 import eu.kanade.presentation.util.Tab
+import eu.kanade.tachiyomi.ui.anime.AnimeScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.SourceFilter
 import kotlinx.coroutines.launch
@@ -168,13 +169,19 @@ data object AiringScheduleTab : Tab {
                             pinnedSourceIds = state.pinnedSourceIds,
                             autoAddFromPinnedSources = state.autoAddFromPinnedSources,
                             libraryAnimeTitles = state.libraryAnimeTitles,
-                            onSearchClick = { title ->
-                                navigator.push(
-                                    GlobalSearchScreen(
-                                        searchQuery = title,
-                                        initialSourceFilter = SourceFilter.All,
-                                    ),
-                                )
+                            onSearchClick = { entry ->
+                                val libraryAnimeId = entry.titleCandidates()
+                                    .firstNotNullOfOrNull { state.openableAnimeIdsByTitle[it] }
+                                if (libraryAnimeId != null) {
+                                    navigator.push(AnimeScreen(libraryAnimeId))
+                                } else {
+                                    navigator.push(
+                                        GlobalSearchScreen(
+                                            searchQuery = entry.displayTitle(state.titleLanguage),
+                                            initialSourceFilter = SourceFilter.All,
+                                        ),
+                                    )
+                                }
                             },
                             onAddToLibraryClick = { title ->
                                 if (state.autoAddFromPinnedSources && state.pinnedSourceIds.isNotEmpty()) {
@@ -280,7 +287,7 @@ private fun ScheduleDayContent(
     pinnedSourceIds: Set<String>,
     autoAddFromPinnedSources: Boolean,
     libraryAnimeTitles: Set<String>,
-    onSearchClick: (String) -> Unit,
+    onSearchClick: (AiringScheduleEntry) -> Unit,
     onAddToLibraryClick: (String) -> Unit,
     notifyOnceMediaIds: Set<String>,
     notifySeriesMediaIds: Set<String>,
@@ -318,7 +325,7 @@ private fun ScheduleDayContent(
                 autoAddFromPinnedSources = autoAddFromPinnedSources,
                 isInLibrary = isInLibrary,
                 notifyState = notifyState,
-                onSearchClick = onSearchClick,
+                onSearchClick = { onSearchClick(entry) },
                 onAddToLibraryClick = onAddToLibraryClick,
                 onToggleNotifyOnce = { onToggleNotifyOnce(entry) },
                 onToggleNotifySeries = { onToggleNotifySeries(entry) },
@@ -326,6 +333,13 @@ private fun ScheduleDayContent(
         }
     }
 }
+
+private fun AiringScheduleEntry.titleCandidates(): List<String> = listOf(
+    titleUserPreferred,
+    titleEnglish,
+    titleRomaji,
+    titleNative,
+).mapNotNull { it?.trim()?.lowercase()?.takeIf(String::isNotEmpty) }.distinct()
 
 @Composable
 private fun ScheduleErrorContent(
