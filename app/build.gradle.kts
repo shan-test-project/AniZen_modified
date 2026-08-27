@@ -79,6 +79,14 @@ android {
             isShrinkResources = true
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
         }
+        maybeCreate("r8Debug").apply {
+            initWith(debug)
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks.add(debug.name)
+        }
         val release by getting {
             isMinifyEnabled = Config.enableCodeShrink
             isShrinkResources = Config.enableCodeShrink
@@ -150,33 +158,6 @@ android {
     }
 
     packaging {
-        jniLibs {
-            keepDebugSymbols += listOf(
-                "libandroidx.graphics.path",
-                "libarchive-jni",
-                "libconscrypt_jni",
-                "libimagedecoder",
-                "libquickjs",
-                "libsqlite3x",
-                "libavcodec",
-                "libavdevice",
-                "libavfilter",
-                "libavformat",
-                "libavutil",
-                "libc++_shared",
-                "libffmpegkit",
-                "libffmpegkit_abidetect",
-                "libgojni",
-                "libmpv",
-                "libplayer",
-                "libpostproc",
-                "libsqlcipher",
-                "libswresample",
-                "libswscale",
-                "libxml2",
-            )
-                .map { "**/$it.so" }
-        }
         resources {
             excludes += setOf(
                 "kotlin-tooling-metadata.json",
