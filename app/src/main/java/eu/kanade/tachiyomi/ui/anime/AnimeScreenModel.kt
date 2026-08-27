@@ -80,6 +80,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
 import mihon.domain.episode.interactor.FilterEpisodesForDownload
 import tachiyomi.core.common.i18n.stringResource
@@ -251,7 +253,7 @@ class AnimeScreenModel(
     val showFileSize = storagePreferences.showEpisodeFileSize().get()
 
     private var fetchSuggestionsJob: kotlinx.coroutines.Job? = null
-    private val suggestionsDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(3)
+    private val suggestionsDispatcher = kotlinx.coroutines.Dispatchers.IO
 
     private fun State.Success.copySuccess(
         anime: Anime = this.anime,
@@ -776,6 +778,11 @@ class AnimeScreenModel(
             }
         }
 
+        // Details and episode updates can arrive together while the screen is starting.
+        // Reusing the in-flight request prevents those updates from repeatedly cancelling
+        // and restarting the network work.
+        if (fetchSuggestionsJob?.isActive == true) return
+
         updateSuccessState { it.copySuccess(isSuggestionsLoading = true) }
 
         fetchSuggestionsJob?.cancel()
@@ -785,7 +792,9 @@ class AnimeScreenModel(
                     updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
                     return@launch
                 }
-                val library = getLibraryAnime.await()
+                // Load ranking context alongside the source requests. The library query
+                // must not delay the first recommendation result from appearing.
+                val libraryDeferred = async { getLibraryAnime.await() }
 
                 val affinityMap = try {
                     val json = Json.parseToJsonElement(libraryPreferences.userAffinityMap().get()).jsonObject
@@ -807,7 +816,12 @@ class AnimeScreenModel(
                     )
                 }.toMutableList()
 
-                fun rankAndSortItems(items: List<Anime>, currentAnime: Anime, type: SuggestionSection.Type): List<Anime> {
+                fun rankAndSortItems(
+                    items: List<Anime>,
+                    currentAnime: Anime,
+                    type: SuggestionSection.Type,
+                    library: List<LibraryAnime>,
+                ): List<Anime> {
                     val currentClean = eu.kanade.tachiyomi.util.lang.StringSimilarity.cleanTitle(currentAnime.title)
                     return items.distinctBy { it.id to it.url }
                         .filter { it.id != currentAnime.id && it.url != currentAnime.url }
@@ -837,26 +851,37 @@ class AnimeScreenModel(
                         .map { it.first }
                 }
 
-                fun updateSection(type: SuggestionSection.Type, items: List<Anime>) {
-                    val currentSuccess = successState ?: return
-                    val rankedItems = rankAndSortItems(items, currentSuccess.anime, type).toImmutableList()
-                    
-                    updateSuccessState { state ->
-                        val index = initialSections.indexOfFirst { it.type == type }
-                        if (index != -1) {
-                            initialSections[index] = initialSections[index].copy(items = rankedItems)
+                val sectionMutex = Mutex()
+
+                suspend fun updateSection(type: SuggestionSection.Type, items: List<Anime>) {
+                    sectionMutex.withLock {
+                        val currentSuccess = successState ?: return
+                        val rankedItems = rankAndSortItems(
+                            items = items,
+                            currentAnime = currentSuccess.anime,
+                            type = type,
+                            library = libraryDeferred.await(),
+                        ).toImmutableList()
+
+                        updateSuccessState { state ->
+                            val index = initialSections.indexOfFirst { it.type == type }
+                            if (index != -1) {
+                                initialSections[index] = initialSections[index].copy(items = rankedItems)
+                            }
+                            val finalSections = initialSections
+                                .sortedBy { it.type }
+                                .toImmutableList()
+                            suggestionsCache.put(anime.id, CachedSuggestions(finalSections, System.currentTimeMillis()))
+                            _suggestionsUpdateFlow.tryEmit(anime.id)
+                            state.copySuccess(suggestionSections = finalSections)
                         }
-                        val finalSections = initialSections
-                            .sortedBy { it.type }
-                            .toImmutableList()
-                        suggestionsCache.put(anime.id, CachedSuggestions(finalSections, System.currentTimeMillis()))
-                        _suggestionsUpdateFlow.tryEmit(anime.id)
-                        state.copySuccess(suggestionSections = finalSections)
                     }
                 }
 
                 // Discovery Load
-                kotlinx.coroutines.withTimeoutOrNull(20000L) {
+                // Recommendations are supplementary content; never hold the screen in a
+                // loading state longer than the source itself is useful.
+                kotlinx.coroutines.withTimeoutOrNull(8000L) {
                     kotlinx.coroutines.coroutineScope {
                         // 0. Franchise & Sequels (Strict Verification)
                         launch {
@@ -864,9 +889,9 @@ class AnimeScreenModel(
                                 val rawVirtualSeasons = discoverSeasons.await(anime)
                                 if (rawVirtualSeasons.isNotEmpty()) {
                                     val validSeasons = rawVirtualSeasons
+                                        .take(12)
                                         .map { async { networkToLocalAnime.await(it) } }
                                         .awaitAll()
-                                        .mapNotNull { getAnime.await(it.id) }
 
                                     if (validSeasons.isNotEmpty()) {
                                         updateSection(SuggestionSection.Type.Franchise, validSeasons)
@@ -881,9 +906,9 @@ class AnimeScreenModel(
                             try {
                                 val searchResult = source.getSearchAnime(1, keywords, source.getFilterList())
                                 val domainAnimes = searchResult.animes
+                                    .take(12)
                                     .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                     .awaitAll()
-                                    .mapNotNull { getAnime.await(it.id) }
                                 if (domainAnimes.isNotEmpty()) updateSection(SuggestionSection.Type.Similarity, domainAnimes)
                             } catch (_: Exception) {}
                         }
@@ -895,9 +920,9 @@ class AnimeScreenModel(
                                     if (animes.isNotEmpty()) {
                                         kotlinx.coroutines.coroutineScope {
                                             val domainAnimes = animes
+                                                .take(12)
                                                 .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                                 .awaitAll()
-                                                .mapNotNull { getAnime.await(it.id) }
                                             updateSection(SuggestionSection.Type.Source, domainAnimes)
                                         }
                                     }
@@ -911,9 +936,9 @@ class AnimeScreenModel(
                                 updateSection(SuggestionSection.Type.Tag, emptyList())
                                 return@launch
                             }
-                            kotlinx.coroutines.withTimeoutOrNull(15000L) {
+                            kotlinx.coroutines.withTimeoutOrNull(6000L) {
                                 kotlinx.coroutines.coroutineScope {
-                                    val tags = anime.genre?.take(3) ?: emptyList()
+                                    val tags = anime.genre?.take(2) ?: emptyList()
                                     val results = tags.map { tag ->
                                         async {
                                             try {
@@ -949,9 +974,9 @@ class AnimeScreenModel(
 
                                                 val searchResult = source.getSearchAnime(1, query, filterList)
                                                 searchResult.animes
+                                                    .take(8)
                                                     .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                                     .awaitAll()
-                                                    .mapNotNull { getAnime.await(it.id) }
                                             } catch (_: Exception) {
                                                 emptyList()
                                             }
